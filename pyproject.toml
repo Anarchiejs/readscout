@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "readscout"
+dynamic = ["version"]
+description = "Local models read your files for your coding agent (Claude Code, Codex): short answers, every claim backed by a verified quote. Nothing leaves your machine."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Lambda" }]
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.20,<2"]
+keywords = ["mcp", "claude-code", "codex", "ollama", "local-llm", "agents", "token-saving"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development",
+]
+
+[project.scripts]
+readscout = "readscout.cli:main"
+readscout-mcp = "readscout.server:main"
+
+[project.urls]
+Homepage = "https://github.com/Anarchiejs/readscout"
+Issues = "https://github.com/Anarchiejs/readscout/issues"
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.hatch.version]
+path = "src/readscout/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/readscout"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

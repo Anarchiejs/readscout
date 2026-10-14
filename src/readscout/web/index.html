@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>readscout</title>
+<style>
+:root{--bg:#f6f6f3;--card:#fff;--fg:#1c1c1a;--mut:#6a6a64;--bd:#e3e3dd;--acc:#2f5bd3;--ok:#1d7a4b;--warn:#a86400;--bad:#b3261e;--bar:#e9e9e4}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151514;--card:#1e1e1c;--fg:#ececea;--mut:#9b9b95;--bd:#2f2f2c;--acc:#7c9cff;--ok:#5cc28f;--warn:#e3a54a;--bad:#f28b82;--bar:#2a2a27}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}h1{font-size:22px;margin:0}
+nav{margin-left:auto;display:flex;gap:6px}nav button{background:none;border:1px solid var(--bd);color:var(--fg);padding:6px 12px;border-radius:8px;cursor:pointer}
+nav button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+h2{font-size:16px;margin:26px 0 8px}.mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin:8px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+label.s{display:block;margin:8px 0}input[type=range]{width:100%;accent-color:var(--acc)}
+button.b{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:7px 14px;cursor:pointer;font:inherit}
+button.g{background:none;color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit}
+button:disabled{opacity:.5;cursor:default}
+.bar{height:8px;background:var(--bar);border-radius:4px;overflow:hidden;margin-top:8px}.bar>i{display:block;height:100%;background:var(--acc);width:0}
+code{background:var(--bar);padding:1px 5px;border-radius:5px;font-size:13px}
+input[type=text]{background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 8px;font:inherit;min-width:0;flex:1}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);font-size:13px}th{color:var(--mut);font-weight:500}
+.big{font-size:24px;font-weight:600}.tag{font-size:12px;border:1px solid var(--bd);border-radius:999px;padding:1px 8px;color:var(--mut)}
+.scroll{overflow-x:auto}#msg{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;max-width:90vw}
+</style>
+</head>
+<body>
+<main>
+<header><h1>readscout</h1><span class="mut" id="ver"></span>
+<nav><button id="t-setup" onclick="show('setup')">Setup</button><button id="t-usage" onclick="show('usage')">Usage</button></nav></header>
+
+<section id="setup">
+  <h2>1. Ollama</h2><div class="card" id="ollama">...</div>
+
+  <h2>2. Your machine</h2>
+  <div class="card">
+    <div id="hw" class="mut">Detecting...</div>
+    <label class="s">GPU memory (VRAM): <b id="vv"></b> GB<input type="range" id="vram" min="6" max="24" step="1"></label>
+    <label class="s">System memory (RAM): <b id="rv"></b> GB<input type="range" id="ram" min="16" max="64" step="1"></label>
+    <div class="mut" style="font-size:13px">Detected values are pre-filled; change them if they look wrong (for example a laptop with shared memory).</div>
+  </div>
+
+  <h2>3. Models for this machine</h2>
+  <div class="grid" id="models"></div>
+  <div class="row" style="margin-top:8px"><button class="b" id="useBtn" onclick="useModels()">Use these models</button><span class="mut" id="cur"></span></div>
+  <div class="card" id="envcard" style="display:none"><div class="row"><div style="flex:1">Recommended Ollama settings (flash attention, 8-bit KV cache, one model at a time) let the bigger models fit next to a small GPU.</div><button class="g" onclick="post('/api/ollama-env',{}).then(r=>toast(r.message))">Apply</button></div></div>
+
+  <h2>4. Coding agents</h2><div class="grid" id="agents"></div>
+
+  <h2>5. Project folders the local models may read</h2>
+  <div class="card"><div id="projects"></div>
+    <div class="row" style="margin-top:10px"><input type="text" id="pid" placeholder="id, e.g. my-app" style="max-width:160px"><input type="text" id="ppath" placeholder="full path of the project folder"><button class="b" onclick="addProject()">Allow</button></div>
+  </div>
+
+  <h2>6. Check</h2><div class="card" id="check"></div>
+</section>
+
+<section id="usage" style="display:none">
+  <div class="grid" id="cards" style="margin-top:16px"></div>
+  <h2>Recent calls</h2><div class="card scroll"><table id="recent"></table></div>
+  <p class="mut" style="font-size:12px">Tokens kept out of your agent's context = (bytes read locally minus characters returned) / 3.5: an estimate.</p>
+</section>
+<div id="msg"></div>
+</main>
+<script>
+const TOKEN='__TOKEN__';let S=null,timer=null,dirty=false;
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>Number(n).toLocaleString();
+function toast(t){const m=$('msg');m.textContent=t;m.style.display='block';clearTimeout(m._t);m._t=setTimeout(()=>m.style.display='none',6000)}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Readscout-Token':TOKEN},body:JSON.stringify(b)});return r.json()}
+function show(v){for(const x of ['setup','usage']){$(x).style.display=x===v?'':'none';$('t-'+x).classList.toggle('on',x===v)}history.replaceState(null,'',v==='setup'?'/setup':'/')}
+async function load(){
+  const q=dirty?`?vram=${$('vram').value}&ram=${$('ram').value}`:'';
+  S=await (await fetch('/api/state'+q)).json();render();
+  const busy=Object.values(S.pulls).some(p=>!p.done);clearTimeout(timer);timer=setTimeout(load,busy?1000:8000);
+}
+function render(){
+  $('ver').textContent='v'+S.version;
+  const o=S.ollama;
+  $('ollama').innerHTML=o.version?`<span class="ok">&#9679;</span> Ollama ${esc(o.version)} is running. ${o.count} model(s) installed.`
+   :o.binary?`<span class="warn">&#9679;</span> Ollama is installed but not running. It starts automatically on first use, or start the Ollama app now.`
+   :`<span class="bad">&#9679;</span> Ollama is not installed. Run the readscout installer again, or install it from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com</a>, then reload this page.`;
+  const h=S.hardware;$('hw').innerHTML=`Detected: <b>${esc(h.gpu)}</b>${h.vram_gb?`, ${h.vram_gb} GB VRAM`:''} (via ${esc(h.source)}), <b>${h.ram_gb} GB RAM</b>, ${esc(h.os)}.`;
+  if(!dirty){$('vram').value=S.chosen.vram_gb;$('ram').value=S.chosen.ram_gb}
+  $('vv').textContent=$('vram').value;$('rv').textContent=$('ram').value;
+  const inst=new Set(S.ollama.installed);
+  $('models').innerHTML=['fast','quality'].map(t=>{const r=S.recommended[t];if(!r)return'';const p=S.pulls[r.model];const have=inst.has(r.model);
+    const pct=p&&p.total?Math.round(100*p.completed/p.total):0;
+    return `<div class="card"><div class="row"><b>${t==='fast'?'Fast':'Quality'}</b><span class="tag">${esc(r.kind)}</span></div>
+      <div class="big">${esc(r.model)}</div>
+      <div class="mut" style="font-size:13px">${r.download_gb} GB download. ${r.read_score!=null?`Read score ${r.read_score}${r.edit_score?', edits '+r.edit_score:''} (measured on ${esc(r.measured_on)}).`:'Not measured yet.'}</div>
+      <div style="font-size:13px;margin-top:6px">${esc(r.why)}</div>
+      <div class="row" style="margin-top:10px">${have?'<span class="ok">&#10003; Installed</span>':p&&!p.done?`<span class="mut">${esc(p.status)} ${pct}%</span>`:p&&p.error?`<span class="bad">${esc(p.error)}</span> <button class="g" onclick="pull('${esc(r.model)}')">Retry</button>`:`<button class="b" ${S.ollama.version||S.ollama.binary?'':'disabled'} onclick="pull('${esc(r.model)}')">Install</button>`}</div>
+      ${p&&!p.done?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>`}).join('');
+  const m=S.config.models;$('cur').textContent=`Currently used: fast = ${m.fast.name}, quality = ${m.quality.name}`;
+  $('envcard').style.display=S.hardware.os==='windows'?'':'none';
+  const a=S.agents;
+  $('agents').innerHTML=[['claude','Claude Code',a.claude_cli,a.claude_wired,'Install Claude Code first.'],['codex','Codex',a.codex_config,a.codex_mcp&&a.codex_skill,'Run Codex once first (it creates ~/.codex).']]
+   .map(([k,n,present,wired,hint])=>`<div class="card"><div class="row"><b>${n}</b>${wired?'<span class="ok">&#10003; connected</span>':present?'<span class="mut">not connected</span>':'<span class="mut">not found</span>'}</div>
+     <div class="mut" style="font-size:13px">${present?'Registers the readscout MCP server and copies the skill. Restart the agent afterwards.':hint}</div>
+     <div class="row" style="margin-top:8px">${k==='claude'&&a.claude_plugin?'<span class="mut">via the readscout plugin</span>':wired?`<button class="g" onclick="agent('${k}','uninstall')">Disconnect</button>`:`<button class="b" ${present?'':'disabled'} onclick="agent('${k}','install')">Connect</button>`}</div></div>`).join('');
+  const pr=Object.entries(S.config.projects);
+  $('projects').innerHTML=pr.length?'<table>'+pr.map(([id,p])=>`<tr><td><b>${esc(id)}</b></td><td class="mut">${esc(p)}</td><td style="text-align:right"><button class="g" onclick="delProject('${esc(id)}')">Remove</button></td></tr>`).join('')+'</table>':'<span class="mut">No folder allowed yet. The local models can only read folders listed here.</span>';
+  const chk=[[!!o.version,'Ollama running'],[inst.has(m.fast.name),`fast model ${m.fast.name} installed`],[inst.has(m.quality.name),`quality model ${m.quality.name} installed`],
+    [a.claude_wired||(a.codex_mcp&&a.codex_skill),'at least one agent connected'],[pr.length>0,'at least one project folder allowed']];
+  $('check').innerHTML=chk.map(([g,t])=>`<div><span class="${g?'ok':'bad'}">${g?'&#10003;':'&#10007;'}</span> ${esc(t)}</div>`).join('')+(chk.every(c=>c[0])?'<p class="ok"><b>Ready.</b> Restart your agent and work as usual; it will delegate large reads by itself.</p>':'');
+  const s=S.stats;
+  $('cards').innerHTML=[['Calls (30 days)',fmt(s.calls)],['Tokens kept out (est.)',fmt(s.tokens_avoided_est)],['Read locally',fmt(s.kb_read_locally)+' KB'],['Returned to agent',fmt(s.kb_returned)+' KB'],
+    ['Verified / dropped',s.verified+' / '+s.dropped],['Edits applied',s.edits_applied+' / '+s.edits],['Empty answers',s.empty_answers],['Local compute',fmt(s.seconds_local)+' s']]
+    .map(([k,v])=>`<div class="card"><div class="mut">${k}</div><div class="big">${v}</div></div>`).join('');
+  $('recent').innerHTML='<tr><th>When</th><th>Tool</th><th>Model</th><th>Read</th><th>Verified / status</th><th>Dropped</th><th>Time</th></tr>'+(s.recent.map(r=>`<tr><td>${new Date(r.time*1000).toLocaleString()}</td><td>${esc(r.tool)}${r.mode&&r.mode!=='find'?' ('+esc(r.mode)+')':''}</td><td>${esc(r.model)}</td><td>${r.bytes_read?fmt(Math.round(r.bytes_read/1000))+' KB':''}</td><td>${esc(r.verified??r.status??'')}</td><td>${r.dropped??''}</td><td>${r.seconds??''} s</td></tr>`).join('')||'<tr><td colspan="7" class="mut">No call yet.</td></tr>');
+}
+function pull(m){post('/api/pull',{model:m}).then(()=>{toast('Downloading '+m);setTimeout(load,500)})}
+function useModels(){const r=S.recommended;post('/api/models',{fast:r.fast.model,quality:r.quality.model}).then(()=>{toast('Saved.');load()})}
+function agent(k,a){post('/api/agent',{agent:k,action:a}).then(r=>{toast(r.message);load()})}
+function addProject(){post('/api/project',{action:'add',id:$('pid').value.trim(),path:$('ppath').value.trim()}).then(r=>{toast(r.message);$('pid').value='';$('ppath').value='';load()})}
+function delProject(id){post('/api/project',{action:'remove',id}).then(r=>{toast(r.message);load()})}
+for(const id of ['vram','ram'])$(id).addEventListener('input',()=>{dirty=true;$('vv').textContent=$('vram').value;$('rv').textContent=$('ram').value;clearTimeout(window._d);window._d=setTimeout(load,250)});
+show('__VIEW__');load();
+</script>
+</body>
+</html>

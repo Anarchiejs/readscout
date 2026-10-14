@@ -1,0 +1,92 @@
+"""Wire readscout into coding agents: Claude Code (MCP + skill) and Codex (MCP + skill). Always reversible."""
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from .paths import PACKAGE
+
+NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+SKILL = PACKAGE / 'skill' / 'SKILL.md'
+CLAUDE_SKILL = Path.home() / '.claude' / 'skills' / 'readscout' / 'SKILL.md'
+CODEX_SKILL = Path.home() / '.agents' / 'skills' / 'readscout' / 'SKILL.md'
+CODEX_CONFIG = Path.home() / '.codex' / 'config.toml'
+CODEX_SECTION = re.compile(r'(?ms)^\[mcp_servers\.readscout\]\n.*?(?=^\[|\Z)')
+
+
+def server_command() -> list[str]:
+    """How an agent should start the MCP server: the installed entry point, else this interpreter."""
+    exe = shutil.which('readscout-mcp')
+    return [exe] if exe else [sys.executable, '-m', 'readscout.server']
+
+
+def _run(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120,
+                          stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+
+
+def _copy_skill(dest: Path):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(SKILL, dest)
+
+
+def status() -> dict:
+    claude = shutil.which('claude')
+    out = {'claude_cli': bool(claude), 'claude_mcp': False, 'claude_plugin': False, 'claude_skill': CLAUDE_SKILL.exists() and CLAUDE_SKILL.read_bytes() == SKILL.read_bytes(),
+           'codex_config': CODEX_CONFIG.exists(), 'codex_mcp': False,
+           'codex_skill': CODEX_SKILL.exists() and CODEX_SKILL.read_bytes() == SKILL.read_bytes()}
+    if claude:
+        out['claude_mcp'] = 'readscout' in _run([claude, 'mcp', 'get', 'readscout']).stdout
+        # Installed as a Claude Code plugin: the plugin brings its own MCP server and skill.
+        out['claude_plugin'] = 'readscout@' in _run([claude, 'plugin', 'list']).stdout
+    out['claude_wired'] = (out['claude_mcp'] and out['claude_skill']) or out['claude_plugin']
+    if CODEX_CONFIG.exists():
+        out['codex_mcp'] = bool(CODEX_SECTION.search(CODEX_CONFIG.read_text(encoding='utf-8')))
+    return out
+
+
+def install_claude() -> str:
+    claude = shutil.which('claude')
+    if not claude:
+        return 'Claude Code CLI not found (install it, then run `readscout install-agent claude`).'
+    _run([claude, 'mcp', 'remove', 'readscout', '-s', 'user'])
+    r = _run([claude, 'mcp', 'add', '-s', 'user', 'readscout', '--', *server_command()])
+    if r.returncode:
+        return f'claude mcp add failed: {(r.stderr or r.stdout).strip()[:300]}'
+    _copy_skill(CLAUDE_SKILL)
+    return f'Claude Code: MCP server "readscout" added (user scope), skill copied to {CLAUDE_SKILL}. Restart Claude Code.'
+
+
+def uninstall_claude() -> str:
+    claude = shutil.which('claude')
+    if claude:
+        _run([claude, 'mcp', 'remove', 'readscout', '-s', 'user'])
+    shutil.rmtree(CLAUDE_SKILL.parent, ignore_errors=True)
+    return 'Claude Code: readscout removed.'
+
+
+def _toml_str(s: str) -> str:
+    return '"' + s.replace('\\', '/').replace('"', '\\"') + '"'
+
+
+def install_codex() -> str:
+    CODEX_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    text = CODEX_CONFIG.read_text(encoding='utf-8') if CODEX_CONFIG.exists() else ''
+    cmd = server_command()
+    section = f'[mcp_servers.readscout]\ncommand = {_toml_str(cmd[0])}\nargs = [{", ".join(_toml_str(a) for a in cmd[1:])}]\n\n'
+    text = CODEX_SECTION.sub('', text).rstrip() + ('\n\n' if text.strip() else '') + section
+    CODEX_CONFIG.write_text(text, encoding='utf-8')
+    _copy_skill(CODEX_SKILL)
+    return f'Codex: [mcp_servers.readscout] written to {CODEX_CONFIG}, skill copied to {CODEX_SKILL}. Restart Codex.'
+
+
+def uninstall_codex() -> str:
+    if CODEX_CONFIG.exists():
+        CODEX_CONFIG.write_text(CODEX_SECTION.sub('', CODEX_CONFIG.read_text(encoding='utf-8')).rstrip() + '\n', encoding='utf-8')
+    shutil.rmtree(CODEX_SKILL.parent, ignore_errors=True)
+    return 'Codex: readscout removed.'
+
+
+INSTALL = {'claude': install_claude, 'codex': install_codex}
+UNINSTALL = {'claude': uninstall_claude, 'codex': uninstall_codex}

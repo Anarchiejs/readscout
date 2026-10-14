@@ -1,0 +1,15 @@
+{
+  "name": "readscout",
+  "description": "readscout: local models read your files for Claude Code (Ollama, verified quotes, nothing leaves your machine).",
+  "owner": {
+    "name": "Lambda",
+    "url": "https://github.com/Anarchiejs"
+  },
+  "plugins": [
+    {
+      "name": "readscout",
+      "source": "./",
+      "description": "Local models read your files for Claude, every claim backed by a verified quote."
+    }
+  ]
+}
