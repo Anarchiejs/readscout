@@ -1,12 +1,17 @@
 name: Release
+# A tag v* builds the package and publishes the GitHub release with its notes from .github/release-notes/<tag>.md.
+# Editing a notes file on main updates the matching release, so notes stay in the repository and under review.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths: [".github/release-notes/**"]
 permissions:
   contents: write
   id-token: write
 jobs:
   build:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,12 +22,29 @@ jobs:
       - name: GitHub release with the wheel, the sdist and the installers
         uses: softprops/action-gh-release@v2
         with:
+          name: readscout ${{ github.ref_name }}
+          body_path: .github/release-notes/${{ github.ref_name }}.md
           files: |
             dist/*
             install.ps1
             install.sh
-          generate_release_notes: true
       # Publishing to PyPI needs a "trusted publisher" configured once on pypi.org for this repository.
       - name: Publish to PyPI
         if: vars.PUBLISH_PYPI == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
+  notes:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update the notes of every existing release that has a notes file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for f in .github/release-notes/v*.md; do
+            tag="$(basename "$f" .md)"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release edit "$tag" --title "readscout $tag" --notes-file "$f"
+              echo "updated $tag"
+            fi
+          done

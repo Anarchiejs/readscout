@@ -26,7 +26,9 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1     # Windows
 
 Testing the Claude Code plugin from a local checkout: `claude plugin validate . --strict`, and run its MCP command
 with `uvx --no-cache --from . readscout-mcp` (uv caches local builds, so without `--no-cache` you may get stale code).
-Bump the version in `src/readscout/__init__.py`, the wheel URLs and `.claude-plugin/plugin.json` together for a release.
+Release: bump the version in `src/readscout/__init__.py`, the wheel URLs (README, installers, `.claude-plugin/plugin.json`)
+and `CHANGELOG.md`, write `.github/release-notes/vX.Y.Z.md`, then push the tag `vX.Y.Z`: the Release workflow builds the
+package and publishes the release with those notes.
 
 ## Rules of the house
 
