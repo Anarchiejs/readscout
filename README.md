@@ -48,7 +48,9 @@ How the answers stay trustworthy:
 - any finding whose quote is not found in the source is **dropped**; line numbers are computed by readscout, never by the model;
 - large inputs are split into chunks instead of being refused; logs are pre-filtered (errors with context, start, end, no duplicates);
 - negative questions ("without", "not", "missing") go to the bigger model automatically, because small models get them wrong;
-- an edit is kept only if your tests pass.
+- an edit is kept only if your tests pass;
+- models free your RAM and VRAM by themselves: Ollama unloads them one minute after the last call, and readscout
+  unloads them as soon as the agent session ends. Nothing to stop by hand (`readscout stop` frees memory at once).
 
 ## Why
 
@@ -113,14 +115,14 @@ The plugin brings the skill and the MCP server (started with `uvx`, nothing else
 download the models and allow a project folder:
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.0/readscout-0.1.0-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl readscout setup
 ```
 
 That opens the same setup page as option A: install the models and add your project folders there (skip
 "Coding agents": the plugin already did it). Restart Claude Code.
 
 Tip: to have a short `readscout` command for later, install it once with
-`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.0/readscout-0.1.0-py3-none-any.whl`.
+`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl`.
 
 ### Option C: manual install
 
@@ -128,7 +130,7 @@ Tip: to have a short `readscout` command for later, install it once with
 # 1. Ollama: https://ollama.com/download (then make sure it is running)
 # 2. uv:     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.0/readscout-0.1.0-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl
 
 # 4. models recommended for your machine (see `readscout hardware` first if you are curious)
 readscout pull
@@ -199,6 +201,7 @@ readscout digest PATH                  run local_digest from the terminal
 readscout edit PATH... -i TEXT --gate "CMD"   run local_edit from the terminal
 readscout stats                        what was read locally instead of by your agent
 readscout dashboard                    usage page
+readscout stop                         unload every model now (they also unload by themselves)
 readscout bench                        measure your models on the public benchmark
 ```
 

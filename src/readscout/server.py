@@ -55,8 +55,11 @@ def local_edit(paths: list[str], instruction: str, gate: list[list[str]] | None 
 
 
 def main():
+    import atexit
+    from .backend import unload_used
     from .hardware import ensure_config
     ensure_config()
+    atexit.register(unload_used)   # the agent session ended: free the memory now rather than in a minute
     mcp.run()
 
 

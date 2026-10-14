@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 LOOPBACK = {'127.0.0.1', 'localhost', '::1'}
+# Ollama itself unloads a model this long after its last request, so memory is freed automatically even if the
+# agent forgets, crashes or never stops. Calls made close together still reuse the loaded model.
+UNLOAD_AFTER = '60s'
+USED: set[tuple[str, str]] = set()   # (url, model) used by this process, unloaded when it exits
 # Settings that let 26B MoE models fit next to an 8 GB GPU (flash attention + 8-bit KV cache).
 OLLAMA_ENV = {'OLLAMA_FLASH_ATTENTION': '1', 'OLLAMA_KV_CACHE_TYPE': 'q8_0', 'OLLAMA_MAX_LOADED_MODELS': '1'}
 
@@ -28,7 +32,7 @@ class Model:
     url: str = 'http://127.0.0.1:11434'
     ctx: int = 32768
     chars_per_token: float = 3.2
-    keep_alive: str = '30m'
+    keep_alive: str = UNLOAD_AFTER
     note: str = ''              # shown in receipts, e.g. when a fallback model was used
 
     def __post_init__(self):
@@ -67,6 +71,7 @@ def _parse(text):
 
 def chat(model: Model, system: str, user: str, schema: dict, max_tokens=2048, timeout=600, temperature=0.0) -> Reply:
     t = time.time()
+    USED.add((model.url, model.name))
     body = {'model': model.name, 'stream': False, 'think': False, 'format': schema, 'keep_alive': model.keep_alive,
             'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
             'options': {'temperature': temperature, 'num_predict': max_tokens, 'num_ctx': model.ctx}}
@@ -90,6 +95,28 @@ def installed_models(url='http://127.0.0.1:11434') -> set[str]:
     with _request(url.rstrip('/') + '/api/tags', timeout=5) as r:
         names = {m['name'] for m in json.load(r).get('models', [])}
     return names | {n.removesuffix(':latest') for n in names}
+
+
+def unload(name: str, url='http://127.0.0.1:11434') -> None:
+    """Free a model's memory now (Ollama unloads it when keep_alive is 0)."""
+    try:
+        with _request(url.rstrip('/') + '/api/generate', {'model': name, 'keep_alive': 0}, timeout=30):
+            pass
+    except BackendError:
+        pass
+
+
+def unload_used() -> None:
+    """Called when the MCP server exits (the agent session ended): nothing stays in memory after it."""
+    for url, name in list(USED):
+        unload(name, url)
+
+
+def unload_all(url='http://127.0.0.1:11434') -> list[str]:
+    names = loaded_models(url)
+    for name in names:
+        unload(name, url)
+    return names
 
 
 def loaded_models(url='http://127.0.0.1:11434') -> list[str]:
@@ -134,8 +161,15 @@ def ensure_ollama(url='http://127.0.0.1:11434', wait=60) -> None:
             raise BackendError(f'Ollama is not installed. Install it from https://ollama.com, then run `{cli()} setup`.')
         cmd = [binary, 'serve']
     env = {**os.environ, **{k: os.environ.get(k, v) for k, v in OLLAMA_ENV.items()}}
-    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
-                     creationflags=flags, start_new_session=sys.platform != 'win32', close_fds=True)
+    spawn = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                 start_new_session=sys.platform != 'win32', close_fds=True)
+    explorer = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'explorer.exe')
+    if sys.platform == 'win32' and cmd[0].endswith('ollama app.exe') and os.path.exists(explorer):
+        # Agents run MCP servers inside a Windows job that kills every child when the session ends. Asking Explorer
+        # to open the app starts Ollama outside that job, like a double-click, so it outlives the session.
+        subprocess.Popen([explorer, cmd[0]], **spawn)
+    else:
+        subprocess.Popen(cmd, creationflags=flags, **spawn)
     deadline = time.time() + wait
     while time.time() < deadline:
         if health(url):

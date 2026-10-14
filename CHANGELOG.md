@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- **Models free the memory by themselves.** Ollama now unloads a model one minute after the last call (it kept it
+  30 minutes before, so a 26B model could hold about 14 GB of RAM long after the agent was done), and readscout
+  unloads the models it used as soon as the agent session ends. Nothing for the agent to remember or check.
+- `readscout stop` frees the memory immediately; the skill tells agents never to start models or inference servers
+  themselves.
+- On Windows, when readscout has to start Ollama, Ollama now outlives the agent session instead of being killed with it.
+
 ## 0.1.0 (unreleased)
 
 First public version.

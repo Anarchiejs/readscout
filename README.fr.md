@@ -21,7 +21,9 @@ agent quand s'en servir :
 
 Un constat dont la citation est introuvable dans la source est supprimé ; les numéros de ligne sont calculés par
 readscout, jamais par le modèle ; les questions à négation (« sans », « pas », « manque ») passent automatiquement au
-gros modèle ; une modification n'est gardée que si tes tests passent.
+gros modèle ; une modification n'est gardée que si tes tests passent. Les modèles libèrent la RAM et la VRAM tout
+seuls : Ollama les décharge une minute après le dernier appel, et readscout dès que la session de l'agent se termine
+(`readscout stop` libère tout immédiatement).
 
 ## Prérequis
 
@@ -73,7 +75,7 @@ Le plugin apporte le skill et le serveur MCP (lancé par `uvx`, rien d'autre à 
 pour télécharger les modèles et autoriser un dossier :
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.0/readscout-0.1.0-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl readscout setup
 ```
 
 C'est la même page que pour l'option A : installe les modèles et ajoute tes dossiers (la partie « Agents » est déjà
@@ -85,7 +87,7 @@ faite par le plugin). Redémarre Claude Code.
 # 1. Ollama : https://ollama.com/download (vérifie qu'il tourne)
 # 2. uv :     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.0/readscout-0.1.0-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl
 # 4. modèles conseillés pour ta machine
 readscout pull
 # 5. connecter tes agents

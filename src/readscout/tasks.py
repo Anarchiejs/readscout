@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import paths
-from .backend import BackendError, Model, chat, ensure_ollama, installed_models
+from .backend import UNLOAD_AFTER, BackendError, Model, chat, ensure_ollama, installed_models
 from .text import AccessError, Line, chunk, load_lines, locate, redact, render, resolve, SKIPPED_DIRS
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -41,7 +41,8 @@ def model_for(cfg, tier: str) -> Model:
     url = cfg.get('ollama_url', 'http://127.0.0.1:11434')
     ensure_ollama(url)
     spec = cfg['models'].get(tier) or cfg['models']['fast']
-    model = Model(name=spec['name'], ctx=spec.get('ctx', 32768), url=url)
+    keep = cfg.get('unload_after', UNLOAD_AFTER)
+    model = Model(name=spec['name'], ctx=spec.get('ctx', 32768), url=url, keep_alive=keep)
     if tier == 'fast':
         try:
             have = installed_models(url)
@@ -58,7 +59,7 @@ def model_for(cfg, tier: str) -> Model:
         if missing:
             # A missing quality model must not turn a question into an error: answer with the fast one and say so.
             fast = cfg['models']['fast']
-            model = Model(name=fast['name'], ctx=fast.get('ctx', 32768), url=url)
+            model = Model(name=fast['name'], ctx=fast.get('ctx', 32768), url=url, keep_alive=keep)
             model.note = f'quality model {spec["name"]} not installed, used {fast["name"]} ({paths.cli()} pull {spec["name"]})'
     return model
 

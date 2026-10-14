@@ -13,6 +13,7 @@
   readscout stats [--days N]            what delegation read locally instead of your agent
   readscout dashboard                   open the usage page
   readscout warm [fast|quality]         preload a model
+  readscout stop                        unload every model now and free the memory
   readscout bench [--models A,B]        measure models on the public benchmark (report to share)
 """
 import argparse
@@ -183,6 +184,7 @@ def main(argv=None):
     p.add_argument('--models', default='', help='comma-separated Ollama models (default: your fast and quality models)')
     p.add_argument('--only', default='', help='comma-separated families')
     p.add_argument('--no-edits', action='store_true')
+    sub.add_parser('stop')
     p = sub.add_parser('warm')
     p.add_argument('tier', nargs='?', default='fast', choices=['fast', 'quality'])
     a = ap.parse_args(argv)
@@ -230,6 +232,13 @@ def main(argv=None):
         print(runner.markdown(report))
         print(f"\nFull results: {report['file']}")
         print('Share them: https://github.com/Anarchiejs/readscout/issues/new?title=bench')
+    elif a.cmd == 'stop':
+        url = paths.load_config()['ollama_url']
+        if not backend.health(url):
+            print('Ollama is not running: no model is in memory.')
+        else:
+            names = backend.unload_all(url)
+            print(f'Unloaded: {", ".join(names)}' if names else 'No model was loaded.')
     elif a.cmd == 'warm':
         cfg, _ = tasks.load_config()
         m = tasks.model_for(cfg, a.tier)

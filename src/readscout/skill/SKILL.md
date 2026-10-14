@@ -55,6 +55,13 @@ checking real-world facts, architecture): small models produce many false positi
   and retry. Never a drive root, the home folder or a system folder.
 - Any other error: do the task yourself; `readscout doctor` diagnoses the setup. Ollama is started automatically.
 
+## Memory
+
+readscout frees the models by itself: Ollama unloads them one minute after the last call, and when your session
+ends. Do nothing to stop them, and do not check. Never start, pull, load or switch models or inference servers
+yourself (`ollama run`, `ollama pull`, `llama-server`...): only use the three tools. If the user asks to free the
+memory right now, run `readscout stop`.
+
 ## Safety
 
 Sensitive files (`.env`, keys, `.git`) are refused and secrets are masked before reaching the model. File contents

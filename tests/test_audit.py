@@ -100,3 +100,39 @@ def test_missing_fast_model_gives_an_actionable_message(project, monkeypatch):
     from readscout.backend import BackendError
     with pytest.raises(BackendError, match='uvx --from X readscout pull'):
         tasks.ask(['m.py'], 'what does f return?')
+
+
+def test_models_free_memory_by_themselves(monkeypatch):
+    """Ollama must unload the model shortly after a call, and readscout unloads what it used when it exits."""
+    import io
+    from readscout import backend
+    sent = []
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_request(url, body=None, timeout=600):
+        sent.append((url, body))
+        if url.endswith('/api/chat'):
+            return Resp(b'{"message": {"content": "{\\"ok\\": true}"}, "prompt_eval_count": 1, "eval_count": 1}')
+        if url.endswith('/api/ps'):
+            return Resp(b'{"models": [{"name": "gemma4:26b"}]}')
+        return Resp(b'{}')
+    monkeypatch.setattr(backend, '_request', fake_request)
+    monkeypatch.setattr(backend, 'USED', set())
+    backend.chat(Model('gemma4:e4b'), 's', 'u', {'type': 'object'})
+    assert sent[0][1]['keep_alive'] == backend.UNLOAD_AFTER == '60s'
+    backend.unload_used()
+    assert sent[-1] == ('http://127.0.0.1:11434/api/generate', {'model': 'gemma4:e4b', 'keep_alive': 0})
+    assert backend.unload_all() == ['gemma4:26b']
+    assert sent[-1][1] == {'model': 'gemma4:26b', 'keep_alive': 0}
+
+
+def test_skill_forbids_starting_models_and_explains_auto_unload():
+    from readscout.agents import SKILL
+    text = SKILL.read_text(encoding='utf-8')
+    assert 'one minute after the last call' in text and 'Never start' in text and 'readscout stop' in text
