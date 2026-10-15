@@ -1,12 +1,10 @@
 """readscout command line.
 
-  readscout setup                       open the setup page (hardware, models, agents, projects)
+  readscout setup                       open the setup page (hardware, models, agents)
   readscout doctor                      check that everything is installed and wired
   readscout hardware                    detected GPU/RAM and recommended models
   readscout pull [MODEL ...]            download models (default: the recommended ones)
   readscout install-agent claude|codex  register the MCP server and the skill (uninstall-agent to undo)
-  readscout register ID PATH            allow the local models to read a project folder (unregister ID)
-  readscout projects                    list allowed folders
   readscout ask PATH... -q QUESTION     same as the local_ask tool  [--summary] [--quality]
   readscout digest PATH [-f FOCUS]      same as local_digest
   readscout edit PATH... -i TEXT        same as local_edit  [--gate "cmd args"]...
@@ -17,8 +15,6 @@
   readscout bench [--models A,B]        measure models on the public benchmark (report to share)
 """
 import argparse
-import os
-import re
 import shlex
 import subprocess
 import sys
@@ -27,41 +23,6 @@ import webbrowser
 from pathlib import Path
 
 from . import __version__, agents, backend, hardware, paths, stats, tasks
-
-FORBIDDEN = [Path.home(), Path(os.environ.get('SystemRoot', 'C:/Windows')), Path('C:/Program Files'), Path('C:/Program Files (x86)'),
-             Path('C:/Users'), Path('/'), Path('/usr'), Path('/etc'), Path('/home'), Path('/Users'), Path('/System')]
-
-
-HOME_PRIVATE = {'.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.config', '.claude', '.codex'}   # at any depth
-HOME_APPDATA = {'AppData', 'Library'}        # the folder and its direct children (Local, Roaming, Application Support...)
-HOME_BROAD = {'Documents', 'Desktop', 'Downloads', 'OneDrive'}
-
-
-def _private_home_folder(root: Path, home: Path) -> bool:
-    if not root.is_relative_to(home):
-        return False
-    parts = root.relative_to(home).parts
-    return bool(parts) and (parts[0] in HOME_PRIVATE or (parts[0] in HOME_APPDATA and len(parts) <= 2)
-                            or (len(parts) == 1 and parts[0] in HOME_BROAD))
-
-
-def register(project_id: str, path: str) -> str:
-    if not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', project_id or ''):
-        raise SystemExit('Invalid id (letters, digits, - and _ only)')
-    root = Path(path).expanduser().resolve(strict=True)
-    home = Path.home().resolve()
-    if (not root.is_dir() or root == Path(root.anchor) or any(root == f.resolve() for f in FORBIDDEN if f.exists())
-            or root == home or root in home.parents or _private_home_folder(root, home)):
-        raise SystemExit('Expected a specific project folder, not a drive, the home folder, a system folder or an application data folder')
-    paths.update_config(lambda cfg: cfg['projects'].__setitem__(project_id, root.as_posix()))
-    return f'Registered {project_id} -> {root}'
-
-
-def unregister(project_id: str) -> str:
-    if project_id not in paths.load_config()['projects']:
-        raise SystemExit(f'Unknown project: {project_id}')
-    paths.update_config(lambda cfg: cfg['projects'].pop(project_id, None))
-    return f'Removed {project_id}'
 
 
 def doctor() -> int:
@@ -88,7 +49,6 @@ def doctor() -> int:
         for tier, spec in cfg['models'].items():
             line(spec['name'] in have, f'{tier} model {spec["name"]} installed', f'readscout pull {spec["name"]}')
     line(paths.config_file().exists(), f'config at {paths.config_file()}', 'readscout setup')
-    line(bool(cfg['projects']), f'{len(cfg["projects"])} project folder(s) allowed', 'readscout register ID PATH')
     st = agents.status()
     if st['claude_cli']:
         line(st['claude_wired'], 'Claude Code wired (plugin, or MCP + skill)', 'readscout install-agent claude')
@@ -171,12 +131,6 @@ def main(argv=None):
     for name in ('install-agent', 'uninstall-agent'):
         p = sub.add_parser(name)
         p.add_argument('agent', choices=['claude', 'codex'])
-    p = sub.add_parser('register')
-    p.add_argument('id')
-    p.add_argument('path')
-    p = sub.add_parser('unregister')
-    p.add_argument('id')
-    sub.add_parser('projects')
     p = sub.add_parser('ask')
     p.add_argument('paths', nargs='+')
     p.add_argument('-q', '--question', required=True)
@@ -218,13 +172,6 @@ def main(argv=None):
         print(agents.INSTALL[a.agent]())
     elif a.cmd == 'uninstall-agent':
         print(agents.UNINSTALL[a.agent]())
-    elif a.cmd == 'register':
-        print(register(a.id, a.path))
-    elif a.cmd == 'unregister':
-        print(unregister(a.id))
-    elif a.cmd == 'projects':
-        for pid, path in paths.load_config()['projects'].items():
-            print(f'{pid:24} {path}{"" if Path(path).exists() else "   (missing)"}')
     elif a.cmd == 'ask':
         print(tasks.ask(a.paths, a.question, 'summary' if a.summary else 'find', True if a.quality else None))
     elif a.cmd == 'digest':

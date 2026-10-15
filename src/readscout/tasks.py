@@ -30,12 +30,8 @@ MAX_EDIT_BYTES = 60_000      # about 15k tokens: the files must fit next to the 
 
 
 def load_config():
-    """Config plus the readable roots, the agent's current project first (MCP servers start in its folder)."""
-    cfg = paths.load_config()
-    roots = [Path(p) for p in cfg.get('projects', {}).values() if Path(p).exists()]
-    cwd = Path.cwd().resolve()
-    roots.sort(key=lambda r: not cwd.is_relative_to(r.resolve()))
-    return cfg, roots
+    """Config plus the root for relative paths: the folder the agent works in (MCP servers start in it)."""
+    return paths.load_config(), [Path.cwd().resolve()]
 
 
 def model_for(cfg, tier: str) -> Model:
@@ -76,8 +72,6 @@ def expand(paths: list[str], roots: list[Path]) -> list[str]:
     for p in paths:
         cand = Path(p) if Path(p).is_absolute() else next((r / p for r in roots if (r / p).exists()), Path(p))
         if cand.is_dir():
-            if project_of(cand, roots) is None:
-                raise AccessError(f'Directory outside registered projects: {p}')
             for dirpath, dirnames, filenames in os.walk(cand):
                 dirnames[:] = sorted(d for d in dirnames if not is_sensitive([d], ''))
                 for name in sorted(filenames):
@@ -453,8 +447,7 @@ def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None
          model: Model | None = None, roots: list[Path] | None = None) -> str:
     cfg, cfg_roots = load_config() if roots is None else ({}, roots)
     roots = cfg_roots
-    if not roots:
-        raise AccessError('File not found inside a registered project: no project is registered')
+    roots = roots or [Path.cwd().resolve()]
     gate = _check_gate(gate)
     model = model or model_for(cfg, tier)
     targets = {}
@@ -462,21 +455,24 @@ def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None
         try:
             real, shown = resolve(p, roots)
         except AccessError:
-            # New file: must sit inside a project root, not exist yet and not be a sensitive name.
-            cand = Path(p) if Path(p).is_absolute() else roots[0] / p
-            proj = project_of(cand.parent, roots) if cand.parent.exists() else None
-            if proj is None or cand.exists():
+            # New file: its folder must already exist, the file must not, and the name must not be sensitive.
+            cand = Path(p).expanduser() if Path(p).expanduser().is_absolute() else roots[0] / p
+            if not cand.parent.is_dir() or cand.exists():
                 raise
-            shown = cand.resolve().relative_to(proj).as_posix()
-            if is_sensitive(Path(shown).parts, Path(shown).name):
-                raise AccessError(f'Sensitive or binary file refused: {p}') from None
             real = cand.resolve()
+            proj = project_of(real, roots)
+            shown = real.relative_to(proj).as_posix() if proj else real.as_posix()
+            if is_sensitive(real.relative_to(proj).parts if proj else real.parts[1:], real.name):
+                raise AccessError(f'Sensitive or binary file refused: {p}') from None
         if shown in targets and targets[shown] != real:
-            raise AccessError(f'Two projects hold a file named {shown}: pass absolute paths one project at a time')
+            raise AccessError(f'Two different files are both shown as {shown}: pass them in separate calls')
         targets[shown] = real
     project = project_of(next(iter(targets.values())), roots)
-    if any(project_of(t, roots) != project for t in targets.values()):
-        raise AccessError('local_edit works on one project at a time')
+    if project is None:          # outside the agent's folder: gate commands run in the folder the files share
+        try:
+            project = Path(os.path.commonpath([str(t.parent) for t in targets.values()]))
+        except ValueError:
+            raise AccessError('local_edit cannot edit files on different drives in one call') from None
     raw = {k: (v.read_bytes() if v.exists() else None) for k, v in targets.items()}
     if sum(len(b) for b in raw.values() if b) > MAX_EDIT_BYTES:
         raise AccessError(f'Files too large for local_edit (over {MAX_EDIT_BYTES // 1000} KB together); edit them yourself')

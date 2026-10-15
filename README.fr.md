@@ -93,9 +93,7 @@ readscout pull
 # 5. connecter tes agents
 readscout install-agent claude
 readscout install-agent codex
-# 6. autoriser un dossier de projet (à répéter pour chaque projet)
-readscout register mon-app /chemin/vers/mon-app
-# 7. vérifier
+# 6. vérifier
 readscout doctor
 ```
 
@@ -132,7 +130,6 @@ de tests), toujours contrôlés par tes tests. Il garde pour lui ce qu'un `grep`
 | Quelque chose ne va pas | `readscout doctor` liste ce qui manque, avec la commande qui le corrige |
 | « Ollama is not installed » | installe ou démarre Ollama (sous Windows et macOS, readscout le lance tout seul) |
 | « Model ... is not installed yet » | `readscout pull` |
-| « File not found inside a registered project » | `readscout register <id> <dossier du projet>` |
 | L'agent n'utilise jamais readscout | redémarre l'agent après l'installation ; `readscout doctor` vérifie la connexion |
 | Réponses lentes | normal pour le gros modèle sur une petite carte (20 à 60 s) ; le petit répond en quelques secondes |
 
@@ -140,7 +137,7 @@ de tests), toujours contrôlés par tes tests. Il garde pour lui ce qu'un `grep`
 
 - Les modèles tournent uniquement sur `127.0.0.1` ; les modèles cloud d'Ollama sont refusés (par leur nom et quand Ollama
   les signale comme servis à distance), jamais de modèle en ligne. Le modèle n'a aucun outil ; seul
-  readscout lit les fichiers, et seulement dans les dossiers autorisés. `.env*`, `.git`, clés, fichiers d'identifiants et
+  readscout lit les fichiers, et seulement les fichiers que ton agent désigne, dans n'importe quel dossier (rien à enregistrer). `.env*`, `.git`, clés, fichiers d'identifiants et
   binaires sont refusés (majuscules comprises) ; les secrets courants sont masqués (par motifs : aucun masque n'est
   parfait, garde les vrais identifiants hors des dossiers autorisés), et `local_edit` refuse les fichiers qui en
   contiennent. `local_edit` écrit de façon atomique, n'écrase jamais un fichier modifié pendant l'attente du modèle, et

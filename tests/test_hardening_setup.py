@@ -49,11 +49,11 @@ def test_unload_reports_failures(monkeypatch):
 
 def test_config_updates_do_not_lose_each_other(tmp_path):
     def add(i):
-        paths.update_config(lambda cfg: cfg['projects'].__setitem__(f'p{i}', f'C:/p{i}'))
+        paths.update_config(lambda cfg: cfg.setdefault('notes', {}).__setitem__(f'p{i}', i))
     threads = [threading.Thread(target=add, args=(i,)) for i in range(12)]
     [t.start() for t in threads]
     [t.join() for t in threads]
-    assert set(paths.load_config()['projects']) == {f'p{i}' for i in range(12)}
+    assert set(paths.load_config()['notes']) == {f'p{i}' for i in range(12)}
     assert not (paths.home() / 'config.lock').exists()
 
 
@@ -114,7 +114,7 @@ def test_web_rejects_unknown_actions_and_cloud_models(server, monkeypatch):
     assert _post(server, '/api/agent', {'agent': 'claude', 'action': 'whatever'}) == 400
     assert _post(server, '/api/agent', {'agent': 'nope', 'action': 'install'}) == 400
     assert called == []
-    assert _post(server, '/api/project', {'action': 'whatever', 'id': 'x'}) == 400
+    assert _post(server, '/api/project', {'action': 'add', 'id': 'x', 'path': '.'}) == 404
     assert _post(server, '/api/models', {'fast': 'gpt-oss:120b-cloud'}) == 400
     assert _post(server, '/api/models', {'fast': 'bad name; rm'}) == 400
     assert _post(server, '/api/models', {'fast': 'gemma4:e2b'}) == 200
@@ -137,17 +137,6 @@ def test_small_machines_are_not_rounded_up():
     assert st['chosen'] == {'vram_gb': 0.0, 'ram_gb': 8.0}
     assert st['recommended']['fast']['model'] == 'gemma4:e2b'
 
-
-def test_register_refuses_private_home_folders(tmp_path, monkeypatch):
-    from readscout import cli
-    home = tmp_path / 'home'
-    for sub in ['AppData/Local', 'Documents', '.ssh', 'work/app']:
-        (home / sub).mkdir(parents=True)
-    monkeypatch.setattr(cli.Path, 'home', classmethod(lambda c: home))
-    for bad in ['AppData/Local', 'Documents', '.ssh', '']:
-        with pytest.raises(SystemExit):
-            cli.register('x', str(home / bad))
-    assert 'Registered' in cli.register('app', str(home / 'work' / 'app'))
 
 
 def test_local_edit_is_not_advertised_as_harmless():

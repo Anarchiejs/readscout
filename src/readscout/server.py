@@ -15,10 +15,7 @@ def _safe(fn, *a, **k):
     try:
         return fn(*a, **k)
     except AccessError as e:
-        hint = ''
-        if 'registered project' in str(e):
-            hint = f' If the user agrees, allow the project folder with `{paths.cli()} register <id> <folder>`, then retry.'
-        return f'readscout ERROR: {e}.{hint} Otherwise do the task yourself.'
+        return f'readscout ERROR: {e}. Do the task yourself.'
     except (BackendError, OSError) as e:
         return f'readscout ERROR: {e}. Do the task yourself (diagnose with `{paths.cli()} doctor`).'
 

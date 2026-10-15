@@ -51,12 +51,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;
 
   <h2>4. Coding agents</h2><div class="grid" id="agents"></div>
 
-  <h2>5. Project folders the local models may read</h2>
-  <div class="card"><div id="projects"></div>
-    <div class="row" style="margin-top:10px"><input type="text" id="pid" placeholder="id, e.g. my-app" style="max-width:160px"><input type="text" id="ppath" placeholder="full path of the project folder"><button class="b" onclick="addProject()">Allow</button></div>
-  </div>
-
-  <h2>6. Check</h2><div class="card" id="check"></div>
+  <h2>5. Check</h2><div class="card" id="check"></div>
 </section>
 
 <section id="usage" style="display:none">
@@ -106,10 +101,8 @@ function render(){
    .map(([k,n,present,wired,hint])=>`<div class="card"><div class="row"><b>${n}</b>${wired?'<span class="ok">&#10003; connected</span>':present?'<span class="mut">not connected</span>':'<span class="mut">not found</span>'}</div>
      <div class="mut" style="font-size:13px">${present?'Registers the readscout MCP server and copies the skill. Restart the agent afterwards.':hint}</div>
      <div class="row" style="margin-top:8px">${k==='claude'&&a.claude_plugin?'<span class="mut">via the readscout plugin</span>':wired?`<button class="g" onclick="agent('${k}','uninstall')">Disconnect</button>`:`<button class="b" ${present?'':'disabled'} onclick="agent('${k}','install')">Connect</button>`}</div></div>`).join('');
-  const pr=Object.entries(S.config.projects);
-  $('projects').innerHTML=pr.length?'<table>'+pr.map(([id,p])=>`<tr><td><b>${esc(id)}</b></td><td class="mut">${esc(p)}</td><td style="text-align:right"><button class="g" onclick="delProject('${esc(id)}')">Remove</button></td></tr>`).join('')+'</table>':'<span class="mut">No folder allowed yet. The local models can only read folders listed here.</span>';
   const chk=[[!!o.version,'Ollama running'],[inst.has(m.fast.name),`fast model ${m.fast.name} installed`],[inst.has(m.quality.name),`quality model ${m.quality.name} installed`],
-    [a.claude_wired||(a.codex_mcp&&a.codex_skill),'at least one agent connected'],[pr.length>0,'at least one project folder allowed']];
+    [a.claude_wired||(a.codex_mcp&&a.codex_skill),'at least one agent connected']];
   $('check').innerHTML=chk.map(([g,t])=>`<div><span class="${g?'ok':'bad'}">${g?'&#10003;':'&#10007;'}</span> ${esc(t)}</div>`).join('')+(chk.every(c=>c[0])?'<p class="ok"><b>Ready.</b> Restart your agent and work as usual; it will delegate large reads by itself.</p>':'');
   const s=S.stats;
   $('cards').innerHTML=[['Calls (30 days)',fmt(s.calls)],['Tokens kept out (est.)',fmt(s.tokens_avoided_est)],['Read locally',fmt(s.kb_read_locally)+' KB'],['Returned to agent',fmt(s.kb_returned)+' KB'],
@@ -120,8 +113,6 @@ function render(){
 function pull(m){post('/api/pull',{model:m}).then(()=>{toast('Downloading '+m);setTimeout(load,500)})}
 function useModels(){const r=S.recommended;post('/api/models',{fast:r.fast.model,quality:r.quality.model}).then(()=>{toast('Saved.');load()})}
 function agent(k,a){post('/api/agent',{agent:k,action:a}).then(r=>{toast(r.message);load()})}
-function addProject(){post('/api/project',{action:'add',id:$('pid').value.trim(),path:$('ppath').value.trim()}).then(r=>{toast(r.message);$('pid').value='';$('ppath').value='';load()})}
-function delProject(id){post('/api/project',{action:'remove',id}).then(r=>{toast(r.message);load()})}
 for(const id of ['vram','ram'])$(id).addEventListener('input',()=>{dirty=true;$('vv').textContent=$('vram').value;$('rv').textContent=$('ram').value;clearTimeout(window._d);window._d=setTimeout(load,250)});
 show('__VIEW__');load();
 </script>

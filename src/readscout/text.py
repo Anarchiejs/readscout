@@ -33,19 +33,28 @@ class Line:
 
 
 def resolve(path: str, roots: list[Path]) -> tuple[Path, str]:
-    """Return the real file path and a display path, refusing anything outside the allowed roots."""
-    p = Path(path)
+    """Return the real file path and a display path.
+
+    The agent decides what to read: any file on this machine is allowed, relative paths start at the first root (the
+    folder the agent works in). Only sensitive or binary files are refused. The display path is relative to the folder
+    the file is in (a root, else the home folder) so that `.git` or `.ssh` in the path are recognised, else absolute.
+    """
+    p = Path(path).expanduser()
     candidates = [p] if p.is_absolute() else [r / p for r in roots]
     for c in candidates:
         real = c.resolve()
-        for root in roots:
-            root = root.resolve()
-            if real.is_relative_to(root) and real.is_file():
-                rel = real.relative_to(root)
-                if is_sensitive(rel.parts, real.name):
-                    raise AccessError(f'Sensitive or binary file refused: {path}')
-                return real, rel.as_posix()
-    raise AccessError(f'File not found inside a registered project: {path}')
+        if not real.is_file():
+            continue
+        base = next((r.resolve() for r in sorted(roots, key=lambda r: -len(r.resolve().parts)) if real.is_relative_to(r.resolve())), None)
+        if base is None:
+            home = Path.home().resolve()
+            base = home if real.is_relative_to(home) else None
+        rel = real.relative_to(base) if base else Path(*real.parts[1:])
+        if is_sensitive(rel.parts, real.name):
+            raise AccessError(f'Sensitive or binary file refused: {path}')
+        in_root = any(real.is_relative_to(r.resolve()) for r in roots)
+        return real, (rel.as_posix() if in_root else real.as_posix())
+    raise AccessError(f'File not found: {path}')
 
 
 def _mask(m: re.Match) -> str:

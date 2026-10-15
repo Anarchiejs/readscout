@@ -17,11 +17,9 @@ function Step($name, [scriptblock]$check) {
 function Has($text, $needle) { if ($text -match [regex]::Escape($needle)) { $global:LASTEXITCODE = 0 } else { Write-Output $text; $global:LASTEXITCODE = 1 } }
 
 Step 'install from local source (uv tool)' { uv tool install --force --python 3.12 $Source 2>&1 | Out-Null; $global:LASTEXITCODE = [int](-not (Test-Path "$T\bin\readscout.exe")) }
-Step 'first run writes a hardware-based config' { readscout projects | Out-Null; Has (Get-Content "$T\home\config.json" -Raw) 'gemma4:26b' }
+Step 'first run writes a hardware-based config' { readscout hardware | Out-Null; readscout doctor | Out-Null; Has (Get-Content "$T\home\config.json" -Raw) 'gemma4:26b' }
 $py = "$T\tools\readscout\Scripts\python.exe"
 & $py -c "from pathlib import Path; from readscout.bench import edits, logs; edits._make(Path(r'$T\demo')); logs.tasks(Path(r'$T\demo\logs'))"
-Step 'register project' { readscout register demo "$T\demo" }
-Step 'refuse registering the home folder' { readscout register home $env:USERPROFILE 2>&1 | Out-Null; $global:LASTEXITCODE = [int]($LASTEXITCODE -eq 0) }
 Push-Location "$T\demo"
 Step 'ask returns verified findings' { Has (readscout ask shop -q 'Which functions raise ValueError?' | Out-String) 'shop/catalog.py:13' }
 Step 'negative question goes to the quality model' { Has (readscout ask shop -q 'Which functions do not validate their input?' | Out-String) 'gemma4:26b' }

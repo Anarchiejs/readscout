@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **No more folder allow-list.** The local models read whatever files and folders the coordinating agent names, in any
+  folder; the "Project folders" card, `readscout register`, `unregister` and `projects` are gone. The model is local and
+  the agent already has the user's file access, so the list protected nothing. Sensitive files (`.env*`, `.git`, keys,
+  credentials) and binaries are still refused.
+
 ## 0.1.2
 
 Fixes from a full audit of the code, the skill and the release process.

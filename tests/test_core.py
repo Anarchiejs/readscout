@@ -41,7 +41,7 @@ def test_redact_secrets():
     assert 'sk-abc' not in text and 'hunter2' not in text and 'ok' in text
 
 
-def test_resolve_confined_to_roots(tmp_path):
+def test_resolve_refuses_only_sensitive_files(tmp_path):
     root = tmp_path / 'proj'
     (root / '.git').mkdir(parents=True)
     (root / 'src.py').write_text('x = 1\n')
@@ -49,9 +49,15 @@ def test_resolve_confined_to_roots(tmp_path):
     (root / '.git' / 'config').write_text('[core]\n')
     (tmp_path / 'outside.py').write_text('y = 2\n')
     assert resolve('src.py', [root])[1] == 'src.py'
-    for bad in ['.env', '.git/config', str(tmp_path / 'outside.py'), '../outside.py']:
+    for bad in ['.env', '.git/config']:
         with pytest.raises(AccessError):
             resolve(bad, [root])
+    # The agent decides what to read: a file outside its own folder is fine, shown with its full path.
+    real, shown = resolve(str(tmp_path / 'outside.py'), [root])
+    assert real == (tmp_path / 'outside.py').resolve() and shown == real.as_posix()
+    assert resolve('../outside.py', [root])[0] == real
+    with pytest.raises(AccessError, match='not found'):
+        resolve('missing.py', [root])
 
 
 def test_prefilter_keeps_errors_head_tail_and_dedupes():
@@ -164,22 +170,6 @@ def test_ask_escalates_to_quality_when_fast_finds_nothing(project, monkeypatch):
     out = tasks.ask(['a.py'], 'what does f return?')
     assert used == ['small', 'big'] and 'retried with quality model' in out and 'a.py:2' in out
 
-
-def test_cli_register_refuses_broad_folders_and_saves(tmp_path, monkeypatch):
-    import json
-    from pathlib import Path
-    from readscout import cli, paths
-    monkeypatch.setenv('READSCOUT_HOME', str(tmp_path / 'home'))
-    with pytest.raises(SystemExit):
-        cli.register('home', str(Path.home()))
-    with pytest.raises(SystemExit):
-        cli.register('bad id!', str(tmp_path))
-    proj = tmp_path / 'proj'
-    proj.mkdir()
-    cli.register('proj', str(proj))
-    assert 'proj' in json.loads(paths.config_file().read_text())['projects']
-    cli.unregister('proj')
-    assert json.loads(paths.config_file().read_text())['projects'] == {}
 
 
 def test_model_prose_never_contains_em_dash():

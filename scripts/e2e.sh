@@ -14,21 +14,18 @@ step() { if eval "$2" >"$T/step.out" 2>&1; then echo "PASS  $1"; pass=$((pass+1)
 
 mkdir -p "$WORK/src" && (cd "$SRC" && tar --exclude=.venv --exclude=.git -cf - .) | tar -xf - -C "$WORK/src"
 step "install from local source (uv tool)" "uv tool install --force --python 3.12 \"$WORK/src\""
-step "first run writes a hardware-based config" "readscout projects && grep -q gemma4:e4b \"$READSCOUT_HOME/config.json\""
+step "first run writes a hardware-based config" "readscout doctor; grep -q gemma4:e4b \"$READSCOUT_HOME/config.json\""
 step "pull recommended models" "readscout pull"
 TOOLPY="$UV_TOOL_DIR/readscout/bin/python"
 
 # A small project to work on.
 "$TOOLPY" -c "from pathlib import Path; from readscout.bench import edits; edits._make(Path('$WORK/demo'))"
 "$TOOLPY" -c "from pathlib import Path; from readscout.bench import logs; logs.tasks(Path('$WORK/demo/logs'))"
-step "register project" "readscout register demo \"$WORK/demo\""
-step "refuse registering the home folder" "! readscout register home \"$HOME\""
 step "ask returns verified findings" "cd \"$WORK/demo\" && readscout ask shop -q 'Which functions raise ValueError?' | tee /dev/stderr | grep -q 'shop/catalog.py:13'"
 step "negative question works (quality tier = fast here)" "cd \"$WORK/demo\" && readscout ask shop -q 'Which functions do not validate their input?' | grep -q 'verified quote'"
 step "digest finds the root cause" "readscout digest \"$WORK/demo/logs\"/service-3000.log | tee /dev/stderr | grep -q 'service-3000.log:1979'"
 step "edit applied with a passing gate" "cd \"$WORK/demo\" && readscout edit shop/catalog.py -i 'paginate returns the wrong page: page 1 must return the first per_page items. Fix it.' --gate 'python3 -m unittest discover -s tests -t .' | tee /dev/stderr | grep -q '^APPLIED'"
 step "edit result is correct" "cd \"$WORK/demo\" && python3 -c 'from shop.catalog import paginate as p; L=list(range(25)); assert p(L,1)==L[:10]'"
-step "edit refused outside the project" "! (cd \"$WORK/demo\" && readscout edit /etc/hostname -i 'x' 2>&1 | grep -q APPLIED)"
 step "edit refuses sensitive new files" "cd \"$WORK/demo\" && ! readscout edit .env -i 'create it' 2>&1 | grep -q APPLIED && [ ! -e .env ]"
 
 # MCP server over stdio, as an agent would use it.

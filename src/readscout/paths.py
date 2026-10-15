@@ -45,7 +45,6 @@ DEFAULT_CONFIG = {
         'quality': {'name': 'gemma4:26b', 'ctx': 32768},
     },
     'ollama_url': 'http://127.0.0.1:11434',
-    'projects': {},
 }
 
 

@@ -1,4 +1,4 @@
-"""Local web UI on 127.0.0.1: /setup (hardware, 1-click model install, agents, projects) and / (usage).
+"""Local web UI on 127.0.0.1: /setup (hardware, 1-click model install, agents) and / (usage).
 
 Every state-changing request needs the per-process token embedded in the page, and the Host and Origin
 headers must be local, so a web site open in the browser cannot drive this server.
@@ -58,7 +58,7 @@ def state(vram=None, ram=None) -> dict:
     return {'version': __version__, 'hardware': hardware.as_dict(hw), 'chosen': {'vram_gb': v, 'ram_gb': r},
             'recommended': hardware.recommend(v, r), 'catalog': hardware.catalog()['models'],
             'ollama': {'count': count if version else 0, 'version': version, 'binary': backend.ollama_binary(), 'installed': installed, 'loaded': backend.loaded_models(url) if version else []},
-            'config': {'models': cfg['models'], 'projects': cfg['projects']},
+            'config': {'models': cfg['models']},
             'agents': _cached('agents', 30, agents.status), 'pulls': PULLS, 'stats': stats.summary(30)}
 
 
@@ -159,16 +159,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {'error': 'unknown action or agent'})
             _CACHE.pop('agents', None)
             return self._send(200, {'message': fn()})
-        if self.path == '/api/project':
-            from .cli import register, unregister
-            action = body.get('action')
-            if action not in ('add', 'remove'):
-                return self._send(400, {'error': 'unknown action'})
-            try:
-                msg = register(body['id'], body['path']) if action == 'add' else unregister(body['id'])
-            except (SystemExit, KeyError, OSError) as e:
-                msg = str(e)
-            return self._send(200, {'message': msg})
         if self.path == '/api/ollama-env':
             return self._send(200, {'message': apply_ollama_env()})
         self._send(404, {'error': 'not found'})

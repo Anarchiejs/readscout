@@ -96,7 +96,6 @@ The installer asks before installing anything:
    - **Your machine:** GPU memory and RAM are detected and pre-filled; adjust the sliders (VRAM 6-24 GB, RAM 16-64 GB) if needed;
    - **Models:** the models recommended for that machine, each with an **Install** button (one click, with a progress bar), then **Use these models**;
    - **Coding agents:** **Connect** Claude Code and/or Codex (registers the MCP server and copies the skill);
-   - **Project folders:** add the folders the local models are allowed to read;
    - **Check:** everything should be green.
 
 Restart Claude Code / Codex, and continue with [First steps](#first-steps).
@@ -112,13 +111,13 @@ installed first. In Claude Code, run:
 ```
 
 The plugin brings the skill and the MCP server (started with `uvx`, nothing else to install). Then, in a terminal,
-download the models and allow a project folder:
+download the models:
 
 ```sh
 uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl readscout setup
 ```
 
-That opens the same setup page as option A: install the models and add your project folders there (skip
+That opens the same setup page as option A: install the models there (skip
 "Coding agents": the plugin already did it). Restart Claude Code.
 
 Tip: to have a short `readscout` command for later, install it once with
@@ -139,10 +138,7 @@ readscout pull
 readscout install-agent claude
 readscout install-agent codex
 
-# 6. allow a project folder (repeat for each project)
-readscout register my-app /path/to/my-app
-
-# 7. check
+# 6. check
 readscout doctor
 ```
 
@@ -151,7 +147,7 @@ Restart Claude Code / Codex.
 ## First steps
 
 1. **Check the setup:** `readscout doctor` must end with `All good.` (plugin users: use the `uvx ... readscout` form above).
-2. **Open a project you allowed** in Claude Code or Codex.
+2. **Open any project** in Claude Code or Codex.
 3. **Ask something that needs a lot of reading**, in your own words. For example:
    - "Which API routes in `src/routes` don't check authentication?"
    - "Where is the session expiry handled in this repo?"
@@ -184,7 +180,6 @@ Things you may see in a receipt:
 - `retried with quality model`: the fast model found nothing quotable, the bigger one was used;
 - `quality model ... not installed, used ...`: install it with `readscout pull <model>` for better answers;
 - `The list may be incomplete`: the agent should narrow the question or add a `grep`;
-- `File not found inside a registered project`: the agent will ask you before allowing that folder.
 
 ## Commands
 
@@ -194,8 +189,6 @@ readscout doctor                       check that everything is installed and wi
 readscout hardware                     detected GPU/RAM and recommended models
 readscout pull [MODEL ...]             download models (default: the recommended ones)
 readscout install-agent claude|codex   register the MCP server and the skill (uninstall-agent to undo)
-readscout register ID PATH             allow a project folder (unregister ID to remove it)
-readscout projects                     list allowed folders
 readscout ask PATH... -q QUESTION      run local_ask from the terminal (--summary, --quality)
 readscout digest PATH                  run local_digest from the terminal
 readscout edit PATH... -i TEXT --gate "CMD"   run local_edit from the terminal
@@ -231,7 +224,6 @@ on 25 reading tasks from four pinned open-source repositories (about 20 s per ta
 | Anything odd | `readscout doctor` lists what is missing, with the command that fixes it |
 | "Ollama is not installed" / "Ollama did not start" | install or start Ollama (on Windows and macOS, readscout starts the app by itself) |
 | "Model ... is not installed yet" | `readscout pull` |
-| "File not found inside a registered project" | `readscout register <id> <project folder>` |
 | The agent never uses readscout | restart the agent after installing; check with `readscout doctor` that it is connected |
 | Answers are slow | normal on small GPUs for the quality model (20-60 s); the fast model answers in seconds |
 | Bigger models run out of memory on Windows | setup page, **Apply** under "Recommended Ollama settings", then restart Ollama |
@@ -242,8 +234,8 @@ on 25 reading tasks from four pinned open-source repositories (about 20 s per ta
   when Ollama reports them as served by a remote host). readscout never calls an online model, even as a fallback. If you
   use Ollama itself with cloud features, that is outside readscout; the Ollama settings it offers also switch them off
   (`OLLAMA_NO_CLOUD=1`).
-- The model has **no tools**: it reads the text readscout gives it and returns JSON. Only readscout reads files, and only
-  inside folders you allowed; `.env*`, `.git`, keys, credential files and binaries are refused whatever the letter case;
+- The model has **no tools**: it reads the text readscout gives it and returns JSON. Only readscout reads files: the ones your
+  agent names, in any folder (nothing to register). `.env*`, `.git`, keys, credential files and binaries are refused whatever the letter case;
   common secret patterns (keys, tokens, `password`/`secret`/`token` assignments, also in JSON) are masked before reaching
   the model, and `local_edit` refuses files that contain one. Masking is pattern based: it cannot catch every secret, so
   keep real credentials out of the folders you allow.

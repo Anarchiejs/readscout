@@ -38,10 +38,10 @@ def test_detect_returns_sane_numbers():
 
 def test_config_lives_in_user_home(tmp_path):
     cfg = paths.load_config()
-    cfg['projects']['x'] = 'C:/x'
+    cfg['notes'] = {'x': 1}
     paths.save_config(cfg)
     assert paths.config_file().parent == tmp_path / 'readscout-home'
-    assert paths.load_config()['projects'] == {'x': 'C:/x'}
+    assert paths.load_config()['notes'] == {'x': 1}
 
 
 def test_codex_install_is_idempotent_and_reversible(tmp_path, monkeypatch):

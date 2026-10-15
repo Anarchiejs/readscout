@@ -24,7 +24,7 @@ If a `grep` gives the answer, it is cheaper than delegating.
 
 - Leave `quality` unset: the bigger model is used automatically for negative questions ("without", "not", "missing"...)
   or when the fast one finds nothing. Set `quality=True` for a subtle question.
-- Relative paths are resolved in the current project; when two projects hold the same relative path, the receipt prefixes it with the project folder name. Folders are accepted (up to 1.5 MB); sensitive and excluded files in them are skipped.
+- Relative paths start at the folder you work in; absolute paths work for any folder, nothing needs to be registered. When two files would show the same name, the receipt prefixes the folder name. Folders are accepted (up to 1.5 MB); sensitive and excluded files in them are skipped.
 
 ## Reading the answer
 
@@ -52,12 +52,9 @@ If a `grep` gives the answer, it is cheaper than delegating.
 What a `grep` returns directly; a short file you will read anyway; any **judgement** (code review, "is there a bug",
 checking real-world facts, architecture): small models produce many false positives there.
 
-## Folder not allowed, errors
+## Errors
 
-- "File not found inside a registered project": ask the user, then run `readscout register <id> <project-root>`
-  and retry. Never a drive root, the home folder or a system folder. (When readscout was installed as a Claude Code
-  plugin, the `readscout` command may not be on the PATH: tell the user to run it from the setup page or with the
-  command shown in the error message.)
+- "File not found": check the path (relative paths start at your working folder).
 - Any other error: do the task yourself; `readscout doctor` diagnoses the setup. Ollama is started automatically.
 
 ## Memory

@@ -151,6 +151,23 @@ def test_edit_gate_shape_is_validated(project, monkeypatch):
             tasks.edit(['m.py'], 'x', bad)
 
 
-def test_edit_with_no_registered_project_is_a_clean_error(monkeypatch):
-    with pytest.raises(AccessError):
-        tasks.edit(['x.py'], 'y', roots=[])
+def test_edit_works_on_a_folder_the_agent_names(tmp_path, monkeypatch):
+    other = tmp_path / 'elsewhere'
+    other.mkdir()
+    (other / 'a.py').write_text('x = 1\n')
+    monkeypatch.setattr(tasks, 'record', lambda entry: None)
+    monkeypatch.setattr(tasks, 'chat', reply_with([{'path': str(other / 'a.py').replace('\\', '/'), 'search': 'x = 1', 'replace': 'x = 2'}]))
+    gate = [[sys.executable, '-c', 'import pathlib; assert pathlib.Path("a.py").read_text().strip() == "x = 2"']]
+    model = Model('m')
+    out = tasks.edit([str(other / 'a.py')], 'x', gate, model=model, roots=[tmp_path / 'proj'])
+    assert out.startswith('APPLIED') and (other / 'a.py').read_text() == 'x = 2\n'
+
+
+def test_reading_a_folder_outside_the_working_directory(tmp_path):
+    work, other = tmp_path / 'work', tmp_path / 'other'
+    work.mkdir()
+    other.mkdir()
+    (other / 'a.py').write_text('x = 1\n')
+    (other / '.env').write_text('A=1\n')
+    lines = tasks.gather([str(other)], [work])
+    assert [l.text for l in lines] == ['x = 1']
