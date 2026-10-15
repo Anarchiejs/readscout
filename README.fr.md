@@ -84,7 +84,7 @@ Le plugin apporte le skill et le serveur MCP (lancé par `uvx`, rien d'autre à 
 pour télécharger les modèles :
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl readscout setup
 ```
 
 C'est la même page que pour l'option A : installe les modèles (la partie « Agents » est déjà faite par le
@@ -96,7 +96,7 @@ plugin). Redémarre Claude Code.
 # 1. Ollama : https://ollama.com/download (vérifie qu'il tourne)
 # 2. uv :     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl
 # 4. modèles conseillés pour ta machine
 readscout pull
 # 5. connecter tes agents

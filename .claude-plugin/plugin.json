@@ -1,7 +1,7 @@
 {
   "name": "readscout",
   "displayName": "readscout",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Local models read your files for Claude: short answers, every claim backed by a verified quote. Saves context and tokens; nothing leaves your machine.",
   "author": {"name": "Lambda", "url": "https://github.com/Anarchiejs"},
   "homepage": "https://github.com/Anarchiejs/readscout",
@@ -12,8 +12,8 @@
   "mcpServers": {
     "readscout": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl", "readscout-mcp"],
-      "env": {"READSCOUT_CLI": "uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl readscout"}
+      "args": ["--from", "https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl", "readscout-mcp"],
+      "env": {"READSCOUT_CLI": "uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl readscout"}
     }
   }
 }

@@ -123,14 +123,14 @@ The plugin brings the skill and the MCP server (started with `uvx`, nothing else
 download the models:
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl readscout setup
 ```
 
 That opens the same setup page as option A: install the models there (skip
 "Coding agents": the plugin already did it). Restart Claude Code.
 
 Tip: to have a short `readscout` command for later, install it once with
-`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl`.
+`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl`.
 
 ### Option C: manual install
 
@@ -138,7 +138,7 @@ Tip: to have a short `readscout` command for later, install it once with
 # 1. Ollama: https://ollama.com/download (then make sure it is running)
 # 2. uv:     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl
 
 # 4. models recommended for your machine (see `readscout hardware` first if you are curious)
 readscout pull

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6
 
 - **Models re-measured (2026-10-15)** with the current scoring and chunk size: `gemma4:12b` 0.94, `gemma4:26b` 0.93,
   `gemma4:e4b` 0.83 (negative questions 0.28), `gemma4:e2b` 0.70; catalog scores, timings and the texts shown in the
