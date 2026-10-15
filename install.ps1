@@ -2,7 +2,7 @@
 #   irm https://raw.githubusercontent.com/Anarchiejs/readscout/main/install.ps1 | iex
 # Installs what is missing (uv, Ollama) after asking, installs readscout, then opens the setup page.
 # Options (when run as a file): -Yes (no questions), -Source <pip spec or local path>, -NoSetup
-param([switch]$Yes, [string]$Source = 'https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl', [switch]$NoSetup)
+param([switch]$Yes, [string]$Source = 'https://github.com/Anarchiejs/readscout/releases/download/v0.1.3/readscout-0.1.3-py3-none-any.whl', [switch]$NoSetup)
 # Native tools (uv, winget) write progress to stderr; Windows PowerShell 5.1 would treat that as an error
 # under 'Stop', so failures are detected through exit codes instead.
 $ErrorActionPreference = 'Continue'

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - **No more folder allow-list.** The local models read whatever files and folders the coordinating agent names, in any
   folder; the "Project folders" card, `readscout register`, `unregister` and `projects` are gone. The model is local and
