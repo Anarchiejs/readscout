@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- **Windows installer:** it closes a running readscout (your agent's MCP server, the setup page) before reinstalling.
+  Those processes locked the files and the reinstall failed with "Access denied". Restart your coding agent afterwards.
+
 ## 0.1.3
 
 - **No more folder allow-list.** The local models read whatever files and folders the coordinating agent names, in any

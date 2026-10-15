@@ -4,7 +4,7 @@
 # Installs what is missing (uv, Ollama) after asking, installs readscout, then opens the setup page.
 # Environment: READSCOUT_YES=1 (no questions), READSCOUT_SOURCE=<pip spec or local path>, READSCOUT_NO_SETUP=1
 set -eu
-SOURCE="${READSCOUT_SOURCE:-https://github.com/Anarchiejs/readscout/releases/download/v0.1.3/readscout-0.1.3-py3-none-any.whl}"
+SOURCE="${READSCOUT_SOURCE:-https://github.com/Anarchiejs/readscout/releases/download/v0.1.4/readscout-0.1.4-py3-none-any.whl}"
 
 ask() {
   [ "${READSCOUT_YES:-0}" = "1" ] && return 0
