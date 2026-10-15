@@ -19,10 +19,13 @@ def main(tag: str | None) -> int:
     plugin = json.loads((ROOT / '.claude-plugin/plugin.json').read_text(encoding='utf-8'))
     if plugin.get('version') != version:
         problems.append(f'.claude-plugin/plugin.json says {plugin.get("version")}')
-    for name in ('.claude-plugin/plugin.json', 'install.sh', 'install.ps1'):
+    for name in ('.claude-plugin/plugin.json', 'install.sh', 'install.ps1', 'README.md', 'README.fr.md'):
         text = (ROOT / name).read_text(encoding='utf-8')
         if wheel not in text:
             problems.append(f'{name} does not point at {wheel}')
+        stale = sorted(set(re.findall(r'releases/download/v([\d.]+)/', text)) - {version})
+        if stale:
+            problems.append(f'{name} still points at version {", ".join(stale)} (python scripts/bump_version.py {version})')
     if not (ROOT / f'.github/release-notes/v{version}.md').exists():
         problems.append(f'.github/release-notes/v{version}.md is missing')
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
