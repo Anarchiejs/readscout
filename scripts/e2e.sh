@@ -3,6 +3,8 @@
 # Isolated, like scripts/e2e.ps1: its own uv tool folder, its own readscout config and its own PATH entry. It never
 # touches your installed readscout, your ~/.config/readscout or your shell setup. Ollama and its models are shared.
 # usage: bash scripts/e2e.sh [path/to/readscout/source]      exit code: 0 when every step passed, 1 otherwise
+# Optional llama.cpp stage: READSCOUT_E2E_LLAMA_SERVER=/path/to/llama-server (the CUDA build on an NVIDIA GPU) runs the
+# quality model on llama.cpp from Ollama's own files and checks doctor, a read and `readscout stop` on that engine.
 SRC="$(cd "${1:-$(dirname "$0")/..}" && pwd)"
 T="$(mktemp -d "${TMPDIR:-/tmp}/readscout-e2e.XXXXXX")" || exit 2
 trap 'kill "${WEB:-}" 2>/dev/null; rm -rf "$T"' EXIT
@@ -61,6 +63,15 @@ step "doctor" "readscout doctor | tee /dev/stderr | grep -q 'Ollama running'"
 step "stats recorded the calls" "readscout stats | tee /dev/stderr | grep -q 'read(s)'"
 step "unit tests on this machine" "cd \"$WORK/src\" && uv run --quiet --python 3.12 --with pytest pytest -q"
 step "public bench (corpus download + fingerprints + scoring)" "readscout bench --models gemma4:e4b --only log,routes_filter,data_access,routes_list | tee /dev/stderr | grep -q '| gemma4:e4b |'"
+if [ -n "${READSCOUT_E2E_LLAMA_SERVER:-}" ]; then
+  QUALITY="$("$TOOLPY" -c "import json,os; print(json.load(open(os.path.join(os.environ['READSCOUT_HOME'], 'config.json')))['models']['quality']['name'])")"
+  step "llama.cpp: quality model on llama.cpp, from Ollama's files" "readscout engine llamacpp --quality ollama:$QUALITY --binary \"$READSCOUT_E2E_LLAMA_SERVER\" | tee /dev/stderr | grep -q 'quality  llamacpp'"
+  step "llama.cpp: doctor lists the devices llama-server sees" "readscout doctor | tee /dev/stderr | grep -q 'llama-server devices:'"
+  step "llama.cpp: a negative question is answered by llama-server" "cd \"$WORK/demo\" && readscout ask shop -q 'Which functions do not validate their input?' | tee /dev/stderr | grep -q 'verified quote'"
+  step "llama.cpp: the fast model still answers on Ollama" "cd \"$WORK/demo\" && readscout ask shop -q 'Which functions raise ValueError?' | grep -q 'shop/catalog.py:13'"
+  step "llama.cpp: stop frees every model" "readscout stop; ! tasklist 2>/dev/null | grep -qi llama-server.exe && ! pgrep -f 'llama-server.*--port' >/dev/null"
+  step "llama.cpp: back to Ollama for every model" "readscout engine ollama | grep -q 'ollama for every model'"
+fi
 step "uninstall cleanly" "uv tool uninstall readscout && hash -r && [ ! -e \"$UV_TOOL_BIN_DIR/readscout\" ]"
 
 echo; echo "RESULT: $pass passed, $fail failed"

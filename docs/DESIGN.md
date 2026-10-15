@@ -37,4 +37,13 @@ asynchronous jobs and a review step where the coordinating agent accepted a fing
 - **Dense 27B models on an 8 GB GPU**: excellent answers, but 51 tokens/s reading and 3 tokens/s writing, so 2.5-8 minutes
   per question. Mixture-of-experts models (4B active) are the right fit for small GPUs.
 - **llama.cpp vs Ollama**: llama.cpp reads prompts 3.5x faster on MoE models with a large micro-batch (`-ub 4096`),
-  but the end-to-end gain on the quality model was about 30 %. Ollama stays the default for simplicity; llama.cpp is on the roadmap.
+  but the end-to-end gain on the quality model was about 30 %. Ollama stays the default for simplicity (one-click model
+  downloads); llama.cpp is an optional engine (`readscout engine llamacpp`): readscout runs a single shared
+  `llama-server` on a loopback port and stops it when idle, like Ollama's `keep_alive`. Re-measured through readscout
+  with Gemma 4 (llama.cpp b11636 CUDA): `-ub 4096` was slower than 2048 with CUDA and could not be allocated at all with
+  Vulkan next to the 26B on 8 GB; prompt reading is 2x faster for the 26B but writing is 1.8x slower, so only big new
+  inputs gain (181 s to 127 s; asked again, Ollama's prompt cache and faster writing win, 30 s against 54 s), and the
+  fast E4B and the 12B are 3x and 2x slower than on Ollama. Ollama's default repeat penalty (1.1 over 64
+  tokens) is required: without it Gemma 4 loops until the output limit under a JSON schema. Hence an engine per
+  model (the fast one on Ollama, the 26B on llama.cpp); on 8 GB the engines take turns on the GPU (each frees the
+  other's idle model before loading), since two resident models would push the 26B's experts out of VRAM.

@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+- **Models re-measured (2026-10-15)** with the current scoring and chunk size: `gemma4:12b` 0.94, `gemma4:26b` 0.93,
+  `gemma4:e4b` 0.83 (negative questions 0.28), `gemma4:e2b` 0.70; catalog scores, timings and the texts shown in the
+  setup page follow. New tables in docs/BENCHMARK.md: the benchmark per engine, a large read per engine, raw speeds.
+- **Fix: chunks no longer overfill the context.** Chunk sizes assumed 3.2 characters per token; Python source measured
+  2.8 with Gemma 4, so a "32k" chunk was 31k tokens and left almost no room for the answer. llama.cpp then cut the
+  answer, and Ollama silently drops the start of the prompt (the instructions and the top of the excerpt) instead.
+  Now 2.6, with the same 10 % margin.
+- **Optional llama.cpp engine.** `readscout engine llamacpp --fast ollama:gemma4:e4b --quality ollama:gemma4:26b` makes
+  readscout run `llama-server` itself on the files Ollama already downloaded (or any `.gguf`), with flash attention,
+  an 8-bit KV cache, a 2048 micro-batch and Ollama's repeat penalty (without it Gemma 4 looped until the output limit),
+  one model at a time shared by every session, stopped after the idle delay or when the process ends. A `url` instead
+  uses your own llama-server as is. `doctor`, `stop` and `bench` (`--models llamacpp:quality`) know the new engine;
+  `llama-server` is found in winget's package folder too. Ollama stays the default: on an RTX 4060 Ti 8 GB the CUDA build
+  reads prompts 2x faster with `gemma4:26b` (a 181 KB folder of new files: 181 s on Ollama, 127 s on llama.cpp) but writes
+  1.8x slower (the same folder asked again: 30 s on Ollama thanks to its prompt cache, 54 s on llama.cpp), ties on the
+  public benchmark, and is 2x to 3x slower with `gemma4:12b` and `gemma4:e4b`; the Vulkan build winget installs was slower
+  than Ollama (README, "Faster with llama.cpp", docs/BENCHMARK.md).
+- **Engine per model.** Only the models named in `readscout engine llamacpp` run on llama.cpp, the others stay on
+  Ollama: `readscout engine llamacpp --quality ollama:gemma4:26b` (no `--fast` needed) keeps `gemma4:e4b` on Ollama,
+  where it is 3x faster, and reads with the 26B on llama.cpp, 2x faster. `--fast ollama` moves a model back;
+  `readscout engine ollama` still puts every model on Ollama and keeps the llama.cpp ones for later. The engines take
+  turns on the GPU: llama.cpp unloads Ollama's models before it starts one, and an Ollama call first stops readscout's
+  idle llama-server (never during another session's request). `readscout engine` and `doctor` show and check each model
+  on its engine, and `bench` measures each one on its engine by default.
+- `readscout bench` frees each model before the next one, so two engines never share the GPU during a run.
+- **llama.cpp: secret key, devices, CUDA advice.** readscout starts `llama-server` with a random per-server key
+  (`LLAMA_API_KEY`, in the environment, kept in `llamacpp.json`), because llama-server allows every web origin and has no
+  key by default: any web page open in the browser could otherwise query it on a guessed loopback port. `readscout doctor`
+  lists the devices llama-server sees (`CUDA0`, `Vulkan0`...) and, on an NVIDIA GPU without a CUDA device, says to take the
+  CUDA build (CUDA 13 builds need NVIDIA driver 580 or newer) and, with several devices, to pick one with `--device`.
+- The setup page shows which engine runs each model (llama.cpp, with the devices and the same advice, or Ollama) and checks
+  each model on its own engine; `scripts/e2e.sh` and `scripts/e2e.ps1` have an optional llama.cpp stage
+  (`READSCOUT_E2E_LLAMA_SERVER`, `-LlamaServer`).
+- Docs: requirements (llama.cpp and CUDA, optional), troubleshooting rows, SECURITY.md (the llama.cpp server threat) and
+  the skill (the first call loads a model, with two engines the two models take turns on the GPU) say what the code now does.
+- `local_edit`'s gate risk is said when an agent is connected and by `readscout doctor`: the gate commands run with
+  your rights even when the agent itself may not use a shell (`readscout gate off`).
+- Receipts and READMEs say plainly that the quote and its line are verified, not the model's sentence next to them.
+- Questions such as "whether or not", "or not", "not only", "n'importe", "ou pas" no longer count as negative questions
+  (they were sent to the slower quality model for nothing).
+- `scripts/bump_version.py X.Y.Z` writes a new version everywhere; `check_version.py` now also checks the READMEs and
+  fails on any stale release URL. CONTRIBUTING.md gains commit message rules.
+- The setup page decodes its query parameters (`%20`, `+`).
 - **Optional limits for restricted agents.** `readscout folders add <dir>` limits the local models to a list of folders
   (reads, edits and new files), `readscout gate off` forbids `local_edit` gate commands. readscout cannot see Claude
   Code's own permission rules, so an agent without Bash or with `Read` deny rules could otherwise get around them. By

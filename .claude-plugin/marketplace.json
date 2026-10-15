@@ -1,6 +1,6 @@
 {
   "name": "readscout",
-  "description": "readscout: local models read your files for Claude Code (Ollama, verified quotes, nothing leaves your machine).",
+  "description": "readscout: local models read your files for Claude Code (Ollama or llama.cpp, verified quotes, nothing leaves your machine).",
   "owner": {
     "name": "Lambda",
     "url": "https://github.com/Anarchiejs"

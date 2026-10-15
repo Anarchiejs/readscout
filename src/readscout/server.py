@@ -1,4 +1,4 @@
-"""stdio MCP server: three synchronous tools backed by local models. Nothing leaves the machine."""
+"""stdio MCP server: three synchronous tools backed by local models (Ollama or llama.cpp). Nothing leaves the machine."""
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP

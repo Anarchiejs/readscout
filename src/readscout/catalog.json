@@ -1,25 +1,25 @@
 {
-  "version": "2026-10-14",
+  "version": "2026-10-15",
   "note": "Scores from `readscout bench` (public corpus v1: 25 reading tasks on 4 pinned MIT repositories, 7 edit tasks). 'measured_on' says where; reports from other machines are welcome (see CONTRIBUTING.md).",
   "models": {
-    "gemma4:e2b":  {"download_gb": 4.6, "kind": "dense 2B (effective)", "read_score": 0.72, "edit_score": "4/7", "read_s": 3, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"},
-    "gemma4:e4b":  {"download_gb": 6.6, "kind": "dense 4B (effective)", "read_score": 0.85, "edit_score": "7/7", "read_s": 5, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"},
-    "gemma4:12b":  {"download_gb": 7.7, "kind": "dense 12B", "read_score": 0.91, "edit_score": "6/7", "read_s": 23, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM (partly offloaded)"},
-    "gemma4:26b":  {"download_gb": 16, "kind": "MoE 26B, 4B active", "read_score": 0.91, "edit_score": "6.8/7", "read_s": 20, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"}
+    "gemma4:e2b":  {"download_gb": 4.6, "kind": "dense 2B (effective)", "read_score": 0.70, "edit_score": "4/7", "read_s": 4, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"},
+    "gemma4:e4b":  {"download_gb": 6.6, "kind": "dense 4B (effective)", "read_score": 0.83, "edit_score": "7/7", "read_s": 6, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"},
+    "gemma4:12b":  {"download_gb": 7.7, "kind": "dense 12B", "read_score": 0.94, "edit_score": "6/7", "read_s": 24, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM (partly offloaded)"},
+    "gemma4:26b":  {"download_gb": 16, "kind": "MoE 26B, 4B active", "read_score": 0.93, "edit_score": "6.8/7", "read_s": 23, "measured_on": "RTX 4060 Ti 8 GB + 32 GB RAM"}
   },
   "tiers": {
     "fast": [
-      {"model": "gemma4:e4b", "min_vram_gb": 12, "ctx": 65536, "why": "Best fast model: 0.85 read score and 7/7 edits at about 5 s per task. Weak on negative questions, which readscout sends to the quality model. With 12 GB of VRAM or more it gets a 64k context (fewer chunks on big files; not benchmarked yet)."},
-      {"model": "gemma4:e4b", "min_vram_gb": 5.5, "why": "Best fast model: 0.85 read score and 7/7 edits at about 5 s per task. Weak on negative questions, which readscout sends to the quality model."},
-      {"model": "gemma4:e2b", "min_vram_gb": 0, "why": "Small enough for little or no GPU memory (0.72 read score; slower on CPU)."}
+      {"model": "gemma4:e4b", "min_vram_gb": 12, "ctx": 65536, "why": "Best fast model: 0.83 read score and 7/7 edits at about 6 s per task. Weak on negative questions, which readscout sends to the quality model. With 12 GB of VRAM or more it gets a 64k context (fewer chunks on big files; not benchmarked yet)."},
+      {"model": "gemma4:e4b", "min_vram_gb": 5.5, "why": "Best fast model: 0.83 read score and 7/7 edits at about 6 s per task. Weak on negative questions, which readscout sends to the quality model."},
+      {"model": "gemma4:e2b", "min_vram_gb": 0, "why": "Small enough for little or no GPU memory (0.70 read score; slower on CPU)."}
     ],
     "quality": [
-      {"model": "gemma4:26b", "min_vram_gb": 24, "min_ram_gb": 15, "ctx": 65536, "why": "Fully on the GPU: 0.91 read score with the best edits (6.8/7) and the fastest answers. With 24 GB of VRAM it gets a 64k context (fewer chunks on big files; not benchmarked yet)."},
-      {"model": "gemma4:26b", "min_vram_gb": 15, "min_ram_gb": 15, "why": "Mostly on the GPU: 0.91 read score with the best edits (6.8/7), much faster than with offloading."},
-      {"model": "gemma4:26b", "min_vram_gb": 6, "min_ram_gb": 30, "min_total_gb": 36, "why": "MoE: inactive experts stay in RAM. 0.91 read score, 6.8/7 edits, about 20 s per task on 8 GB VRAM + 32 GB RAM."},
-      {"model": "gemma4:12b", "min_vram_gb": 14, "min_ram_gb": 8, "ctx": 65536, "why": "Same 0.91 read score as the 26B, dense 7.7 GB: it fits in the GPU with room for a 64k context (not benchmarked yet) and needs little RAM."},
-      {"model": "gemma4:12b", "min_vram_gb": 10, "min_ram_gb": 8, "why": "Same 0.91 read score as the 26B, fits in 10-12 GB of VRAM and needs little RAM."},
-      {"model": "gemma4:12b", "min_vram_gb": 8, "min_ram_gb": 16, "why": "Same 0.91 read score as the 26B. On 8 GB of VRAM part of it runs from RAM: 23 s per task measured with 32 GB of RAM (not measured with 16 GB)."}
+      {"model": "gemma4:26b", "min_vram_gb": 24, "min_ram_gb": 15, "ctx": 65536, "why": "Fully on the GPU: 0.93 read score with the best edits (6.8/7) and the fastest answers. With 24 GB of VRAM it gets a 64k context (fewer chunks on big files; not benchmarked yet)."},
+      {"model": "gemma4:26b", "min_vram_gb": 15, "min_ram_gb": 15, "why": "Mostly on the GPU: 0.93 read score with the best edits (6.8/7), much faster than with offloading."},
+      {"model": "gemma4:26b", "min_vram_gb": 6, "min_ram_gb": 30, "min_total_gb": 36, "why": "MoE: inactive experts stay in RAM. 0.93 read score, 6.8/7 edits, about 23 s per task on 8 GB VRAM + 32 GB RAM."},
+      {"model": "gemma4:12b", "min_vram_gb": 14, "min_ram_gb": 8, "ctx": 65536, "why": "Same read score as the 26B (0.94 against 0.93), dense 7.7 GB: it fits in the GPU with room for a 64k context (not benchmarked yet) and needs little RAM."},
+      {"model": "gemma4:12b", "min_vram_gb": 10, "min_ram_gb": 8, "why": "Same read score as the 26B (0.94 against 0.93), fits in 10-12 GB of VRAM and needs little RAM."},
+      {"model": "gemma4:12b", "min_vram_gb": 8, "min_ram_gb": 16, "why": "Same read score as the 26B (0.94 against 0.93). On 8 GB of VRAM part of it runs from RAM: 24 s per task measured with 32 GB of RAM (not measured with 16 GB)."}
     ]
   }
 }

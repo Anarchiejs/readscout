@@ -4,9 +4,9 @@ Run it yourself: `readscout bench` (or `readscout bench --models gemma4:e4b,gemm
 into a [GitHub issue](https://github.com/Anarchiejs/readscout/issues/new?title=bench) and saves the full results as JSON.
 Reports from other GPUs are how the model catalog improves.
 
-> Scoring note: from the release after 0.1.1, a finding about the wrong subject on the right line no longer counts and a
-> log task needs the root cause. The scores below were measured with the earlier, more lenient rule and have not been
-> re-measured yet, so treat them as upper bounds.
+> The reading and editing tables were re-measured on 2026-10-15 with the current scoring (a finding about the wrong
+> subject on the right line does not count, a log task needs the root cause) and the current chunk size (2.6 characters
+> per token). The appendix at the end (private corpus, earlier pipeline) is kept for the model-selection and speed history.
 
 ## Public corpus v1
 
@@ -35,29 +35,107 @@ judged by hidden checks (AST comparison, behaviour tests, mutation testing for w
 
 Score = F1 of the verified findings (recall of the ground truth times precision of what was returned).
 
-## Results: RTX 4060 Ti 8 GB, Ryzen 5 7600X, 32 GB RAM, Windows 11, Ollama 0.40 (2026-10-14)
+## Results: RTX 4060 Ti 8 GB, Ryzen 5 7600X, 32 GB RAM, Windows 11, Ollama 0.40.3 (2026-10-15)
 
 | Model | routes_list | routes_filter | routes_negation | data_access | env_vars | locate | log | **Read** | s/task | **Edit** | s/task |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| gemma4:26b | 0.85 | 1.00 | 0.88 | 1.00 | 0.78 | 0.88 | 1.00 | **0.91** | 20 | **6.8/7** | 9 |
-| gemma4:12b | 0.98 | 1.00 | 0.88 | 1.00 | 0.65 | 0.88 | 1.00 | **0.91** | 23 | **6/7** | 12 |
-| gemma4:e4b | 0.99 | 0.95 | 0.48 | 0.87 | 0.77 | 0.88 | 1.00 | **0.85** | 5 | **7/7** | 3 |
-| gemma4:e2b | 0.60 | 0.76 | 0.12 | 0.82 | 0.71 | 1.00 | 1.00 | **0.72** | 3 | **4/7** | 3 |
+| gemma4:12b | 0.98 | 1.00 | 0.88 | 1.00 | 0.81 | 0.88 | 1.00 | **0.94** | 24 | **6/7** | 12 |
+| gemma4:26b | 0.99 | 1.00 | 0.88 | 1.00 | 0.76 | 0.88 | 1.00 | **0.93** | 23 | **6.8/7** | 10 |
+| gemma4:e4b | 0.95 | 0.97 | 0.28 | 0.87 | 0.72 | 1.00 | 1.00 | **0.83** | 6 | **7/7** | 4 |
+| gemma4:e2b | 0.66 | 0.73 | 0.12 | 0.76 | 0.66 | 1.00 | 1.00 | **0.70** | 4 | **4/7** | 3 |
 
-Full data: [bench-results/rtx4060ti-8gb_32gb-ram_windows.json](bench-results/rtx4060ti-8gb_32gb-ram_windows.json).
+Full data: [bench-results/rtx4060ti-8gb_32gb-ram_windows.json](bench-results/rtx4060ti-8gb_32gb-ram_windows.json)
+(2026-10-14 run, earlier scoring) and
+[bench-results/rtx4060ti-8gb_32gb-ram_windows_ollama-vs-llamacpp.json](bench-results/rtx4060ti-8gb_32gb-ram_windows_ollama-vs-llamacpp.json)
+(2026-10-15: `gemma4:26b` and `gemma4:e4b` on Ollama and on llama.cpp; the `gemma4:12b` and `gemma4:e2b` rows above come
+from separate runs of the same benchmark, not kept as files).
 
 What it shows:
 - Small models are as good as big ones at extraction (route lists, filters, logs) but fall apart on **negative
-  questions** (0.48 and 0.12). readscout therefore sends negative questions to the quality model automatically.
-- `gemma4:12b` matches `gemma4:26b` at reading; it is the better quality model for 10-12 GB GPUs or 16 GB of RAM.
+  questions** (0.28 and 0.12). readscout therefore sends negative questions to the quality model automatically.
+- `gemma4:12b` matches `gemma4:26b` at reading (0.94 and 0.93); it is the better quality model for 10-12 GB GPUs or
+  16 GB of RAM, a little behind on edits (6/7 against 6.8/7).
+- The scores moved by a few points since 2026-10-14 (26B 0.91 to 0.93, e4b 0.85 to 0.83, 12B 0.91 to 0.94) although the
+  scoring got stricter: the context is no longer overfilled (a chunk now leaves room for the answer), and single runs of
+  25 tasks vary by about 0.02-0.03 (the same `gemma4:26b` scored 0.93 on Ollama and 0.94 on llama.cpp).
 - The public corpus found a real bug: identical quoted lines (the same decorator on several endpoints) were all
   located at their first occurrence. Fixed in 0.1.0 (the model's line hint now picks among verified occurrences);
   scores before the fix were 0.70 (e4b) and 0.84 (26b).
 
+## Engines: Ollama and llama.cpp
+
+Same machine, same GGUF files (llama.cpp reads the files Ollama downloaded), Gemma 4, 32k context, temperature 0.
+Ollama 0.40.3; llama.cpp b11636 CUDA 13.4 with `-fa on -ctk q8_0 -ctv q8_0 -b 4096 -ub 2048 -np 1` and, for the 26B,
+`--n-cpu-moe 30` (experts of 30 layers in RAM). Both through the real readscout pipeline (chunking, schema-constrained
+output, quote verification).
+
+### The public benchmark, per engine
+
+| Model (engine) | routes_list | routes_filter | routes_negation | data_access | env_vars | locate | log | **Read** | s/task | **Edit** | s/task |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| gemma4:26b (Ollama) | 0.99 | 1.00 | 0.88 | 1.00 | 0.76 | 0.88 | 1.00 | **0.93** | 23 | **6.8/7** | 10 |
+| gemma4:26b (llama.cpp) | 0.99 | 1.00 | 0.87 | 1.00 | 0.82 | 0.88 | 1.00 | **0.94** | 23 | **6.8/7** | 14 |
+| gemma4:12b (Ollama) | 0.98 | 1.00 | 0.88 | 1.00 | 0.81 | 0.88 | 1.00 | **0.94** | 24 | **6/7** | 12 |
+| gemma4:12b (llama.cpp) | 0.98 | 1.00 | 0.81 | 1.00 | 0.86 | 0.88 | 1.00 | **0.93** | 50 | **6.8/7** | 25 |
+| gemma4:e4b (Ollama) | 0.95 | 0.97 | 0.28 | 0.87 | 0.72 | 1.00 | 1.00 | **0.83** | 6 | **7/7** | 4 |
+| gemma4:e4b (llama.cpp) | 0.95 | 1.00 | 0.56 | 0.82 | 0.70 | 1.00 | 1.00 | **0.86** | 17 | **6.8/7** | 8 |
+
+The quality is the same on both engines (differences of 0.01-0.03 are run to run noise; 0.28 against 0.56 on the
+negative questions of `gemma4:e4b` is a handful of findings). Only the speed differs, and not in one direction.
+
+### Reading one folder of 181 KB with `gemma4:26b` (3 chunks of about 25,000 tokens)
+
+| | Ollama | llama.cpp |
+|---|---|---|
+| Prompt reading | 554-566 tokens/s | 1,008-1,205 tokens/s |
+| Writing | 42-45 tokens/s | 24-25 tokens/s |
+| New files, first question | 181 s | 127 s (126 and 124 s in two other processes) |
+| Same files, same question again | 30 s | 54 s |
+
+The excerpt comes before the question in the prompt, so both engines reuse their cached start of the prompt when the same
+files are asked about again; only the answer is written. Ollama then wins because it writes almost twice as fast. For new
+files llama.cpp wins by about 30 % overall (the prompt is the larger part of the work).
+
+### Raw speed (`llama-bench`, prompt of 7,000 tokens, 8-bit KV cache, flash attention)
+
+| Model | Build | Micro-batch (`-ub`) | Experts on the CPU (`--n-cpu-moe`) | Reading tokens/s | Writing tokens/s |
+|---|---|---|---|---|---|
+| gemma4:e4b | CUDA | 2048 | - | 3,889 | 59.8 |
+| gemma4:e4b | CUDA | 4096 | - | 3,449 | 60.0 |
+| gemma4:e4b | Vulkan | 512 | - | 3,516 | 59.2 |
+| gemma4:26b | CUDA | 2048 | 24 | 666 | 29.9 |
+| gemma4:26b | CUDA | 2048 | 30 | 1,201 | 27.9 |
+| gemma4:26b | CUDA | 4096 | 24 | 191 | 30.8 |
+| gemma4:26b | CUDA | 4096 | 30 | 711 | 6.0 |
+| gemma4:26b | Vulkan | 1024 | 30 | 527 | 22.6 |
+| gemma4:26b | Vulkan | 2048 | 30 | 784 | 23.1 |
+| gemma4:26b | Vulkan | 2048 | 26 | 113 | 21.3 |
+| gemma4:26b | Vulkan | 4096 | 30 | out of memory (a 5.2 GB buffer) | - |
+| gemma4:12b | CUDA | 512 | all layers on the GPU | 143 | 19.4 |
+| gemma4:12b | CUDA | 512 | 30 layers on the GPU | 1,025 | 14.2 |
+
+(The 12B rows use a prompt of 2,048 tokens and `-ngl`; the others a prompt of 7,000 tokens.)
+
+What it shows:
+- `-ub 4096`, the fastest setting measured earlier (appendix), is **slower** than 2048 with the CUDA build on an 8 GB card
+  for this model, and cannot even be allocated with the Vulkan build: readscout uses 2048.
+- Experts on the CPU is a balance: 24 layers writes slightly faster, 30 reads about twice as fast; the benchmark above
+  used 30.
+- The Vulkan build is as fast as CUDA on the small model but clearly behind on the 26B, and in the real pipeline it was
+  slower than Ollama on this NVIDIA card (a 172 KB read with `gemma4:e4b` took 79 s against 35 s on Ollama): take the
+  CUDA build with NVIDIA.
+- Ollama's own repeat penalty (1.1 over the last 64 tokens) must be sent to llama-server: without it Gemma 4 looped until
+  the output limit under a JSON schema. Chunks must also leave room for the answer (2.6 characters per token, measured
+  2.8 on Python source), or llama.cpp cuts the answer.
+- The 12B, a dense 7.7 GB model on an 8 GB card, writes at 12-19 tokens/s on llama.cpp whatever the offload: it is not a
+  llama.cpp model on this machine.
+
 ## Appendix: model-selection campaign (private corpus)
 
 
-Measured on one machine: RTX 4060 Ti 8 GB, Ryzen 5 7600X, 32 GB DDR5, Windows 11, Ollama 0.40 and llama.cpp b11592.
+Measured on one machine: RTX 4060 Ti 8 GB, Ryzen 5 7600X, 32 GB DDR5, Windows 11, Ollama 0.40 and llama.cpp b11592, with
+the pipeline and the chunk size of that time (the llama.cpp lines are superseded by the "Engines" section above, which
+measures the current build through the current pipeline).
 Models at 4-bit quantization, 32k context, 8-bit KV cache, temperature 0.
 
 ### Method

@@ -7,7 +7,7 @@
   "homepage": "https://github.com/Anarchiejs/readscout",
   "repository": "https://github.com/Anarchiejs/readscout",
   "license": "MIT",
-  "keywords": ["local-llm", "ollama", "tokens", "context", "mcp"],
+  "keywords": ["local-llm", "ollama", "llama-cpp", "tokens", "context", "mcp"],
   "skills": ["./src/readscout/skill/"],
   "mcpServers": {
     "readscout": {

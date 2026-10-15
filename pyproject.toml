@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Lambda" }]
 requires-python = ">=3.11"
 dependencies = ["mcp>=1.23,<2"]
-keywords = ["mcp", "claude-code", "codex", "ollama", "local-llm", "agents", "token-saving"]
+keywords = ["mcp", "claude-code", "codex", "ollama", "llama-cpp", "local-llm", "agents", "token-saving"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

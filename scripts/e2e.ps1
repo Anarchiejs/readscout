@@ -1,7 +1,9 @@
 # End-to-end test of readscout on Windows with a real Ollama and GPU (run before a release).
 # Isolated: own uv tool folder and own config, the user PATH is never touched.
-# usage: powershell -File scripts\e2e.ps1 [-Source path\to\readscout]
-param([string]$Source = (Split-Path -Parent $PSScriptRoot))
+# usage: powershell -File scripts\e2e.ps1 [-Source path\to\readscout] [-LlamaServer path\to\llama-server.exe]
+# -LlamaServer (the CUDA build on an NVIDIA GPU) adds a llama.cpp stage: the quality model runs on llama.cpp from
+# Ollama's own files, and doctor, a read and `readscout stop` are checked on that engine.
+param([string]$Source = (Split-Path -Parent $PSScriptRoot), [string]$LlamaServer = '')
 $ErrorActionPreference = 'Continue'
 $T = Join-Path $env:TEMP 'rs-win-e2e'
 Remove-Item -Recurse -Force $T -ErrorAction SilentlyContinue
@@ -52,6 +54,17 @@ Step 'POST without token refused' { try { Invoke-WebRequest http://127.0.0.1:879
 Stop-Process -Id $web.Id -Force -ErrorAction SilentlyContinue
 Step 'doctor sees Ollama and the models' { Has (readscout doctor | Out-String) 'OK   quality model gemma4:26b installed' }
 Step 'public bench (subset)' { Has (readscout bench --models gemma4:e4b --only log,data_access --no-edits | Out-String) '| gemma4:e4b |' }
+if ($LlamaServer) {
+    $quality = (Get-Content "$T\home\config.json" -Raw | ConvertFrom-Json).models.quality.name
+    Push-Location "$T\demo"
+    Step 'llama.cpp: quality model on llama.cpp, from Ollama files' { Has (readscout engine llamacpp --quality "ollama:$quality" --binary $LlamaServer | Out-String) 'quality  llamacpp' }
+    Step 'llama.cpp: doctor lists the devices llama-server sees' { Has (readscout doctor | Out-String) 'llama-server devices:' }
+    Step 'llama.cpp: a negative question is answered by llama-server' { Has (readscout ask shop -q 'Which functions do not validate their input?' | Out-String) 'verified quote' }
+    Step 'llama.cpp: the fast model still answers on Ollama' { Has (readscout ask shop -q 'Which functions raise ValueError?' | Out-String) 'shop/catalog.py:13' }
+    Step 'llama.cpp: stop frees every model' { readscout stop | Out-Null; $global:LASTEXITCODE = [int]([bool](Get-Process llama-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Resolve-Path $LlamaServer).Path })) }
+    Step 'llama.cpp: back to Ollama for every model' { Has (readscout engine ollama | Out-String) 'ollama for every model' }
+    Pop-Location
+}
 Step 'uninstall cleanly' { uv tool uninstall readscout 2>&1 | Out-Null; $global:LASTEXITCODE = [int](Test-Path "$T\bin\readscout.exe") }
 "RESULT: $script:pass passed, $script:fail failed"
 Remove-Item -Recurse -Force $T -ErrorAction SilentlyContinue
