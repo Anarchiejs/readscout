@@ -17,6 +17,15 @@ CODEX_CONFIG = Path.home() / '.codex' / 'config.toml'
 CODEX_SECTION = re.compile(r'(?ms)^[ \t]*\[mcp_servers\.readscout(?:\.[^\]\n]*)?\][ \t]*\r?\n.*?(?=^[ \t]*\[(?!mcp_servers\.readscout[\].])|\Z)')
 
 
+GATE_NOTICE = ('local_edit runs the check commands your agent picks, with your rights, even if the agent itself may '
+               'not use a shell. If you restrict your agent, run `readscout gate off`.')
+
+
+def gate_notice() -> str:
+    from . import paths
+    return f'\nNote: {GATE_NOTICE}' if paths.gate_allowed(paths.load_config()) else ''
+
+
 def server_command() -> list[str]:
     """How an agent should start the MCP server: the installed entry point, else this interpreter."""
     exe = shutil.which('readscout-mcp')
@@ -57,7 +66,7 @@ def install_claude() -> str:
     if r.returncode:
         return f'claude mcp add failed: {(r.stderr or r.stdout).strip()[:300]}'
     _copy_skill(CLAUDE_SKILL)
-    return f'Claude Code: MCP server "readscout" added (user scope), skill copied to {CLAUDE_SKILL}. Restart Claude Code.'
+    return f'Claude Code: MCP server "readscout" added (user scope), skill copied to {CLAUDE_SKILL}. Restart Claude Code.' + gate_notice()
 
 
 def uninstall_claude() -> str:
@@ -108,7 +117,7 @@ def install_codex() -> str:
                 f'Nothing was changed. Remove that entry or add this section yourself:\n{section}')
     _write_codex(new)
     _copy_skill(CODEX_SKILL)
-    return f'Codex: [mcp_servers.readscout] written to {CODEX_CONFIG} (backup: {CODEX_CONFIG.name}.readscout-bak), skill copied to {CODEX_SKILL}. Restart Codex.'
+    return f'Codex: [mcp_servers.readscout] written to {CODEX_CONFIG} (backup: {CODEX_CONFIG.name}.readscout-bak), skill copied to {CODEX_SKILL}. Restart Codex.' + gate_notice()
 
 
 def uninstall_codex() -> str:

@@ -1,4 +1,5 @@
 """Talks to the local Ollama server: schema-constrained chat, health, auto-start, model pulls.
+Models whose engine is llama.cpp are served by llamacpp.py; `chat` sends them there.
 
 Only loopback endpoints are accepted, so file contents can never leave the machine through this module.
 """
@@ -35,9 +36,14 @@ class Model:
     name: str
     url: str = 'http://127.0.0.1:11434'
     ctx: int = 32768
-    chars_per_token: float = 3.2
+    # Measured 2.8 on Python source with Gemma 4 (171 KB, llama-server's token counts). 3.2 overfilled the context:
+    # llama.cpp then truncated the answer, and Ollama silently drops the start of the prompt instead.
+    chars_per_token: float = 2.6
     keep_alive: str = UNLOAD_AFTER
     note: str = ''              # shown in receipts, e.g. when a fallback model was used
+    engine: str = 'ollama'      # or 'llamacpp' (llamacpp.py)
+    gguf: str = ''              # llama.cpp: the model file readscout serves itself; empty = the user's server at `url`
+    args: tuple = ()            # llama.cpp: extra llama-server flags
 
     def __post_init__(self):
         if urlparse(self.url).hostname not in LOOPBACK:
@@ -49,7 +55,7 @@ class Model:
 def check_local(model: 'Model') -> None:
     """A loopback address is not enough: Ollama can forward some models to its cloud. Refuse those (once per model)."""
     key = (model.url, model.name)
-    if key in CHECKED:
+    if model.engine != 'ollama' or key in CHECKED:      # llama-server has no cloud models: loopback is the whole check
         return
     with _request(model.url.rstrip('/') + '/api/tags', timeout=5) as r:
         tags = json.load(r).get('models', [])
@@ -67,15 +73,15 @@ class Reply:
     seconds: float
 
 
-def _request(url, body=None, timeout=600):
+def _request(url, body=None, timeout=600, headers=None):
     data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(url, data, {'Content-Type': 'application/json'})
+    req = urllib.request.Request(url, data, {'Content-Type': 'application/json', **(headers or {})})
     try:
         return urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as e:
         raise BackendError(f'HTTP {e.code} from {url}: {e.read()[:300].decode(errors="replace")}') from e
     except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-        raise BackendError(f'Ollama unreachable at {url}: {e}') from e
+        raise BackendError(f'Local model server unreachable at {url}: {e}') from e
 
 
 def _parse(text):
@@ -89,6 +95,11 @@ def _parse(text):
 
 
 def chat(model: Model, system: str, user: str, schema: dict, max_tokens=2048, timeout=600, temperature=0.0) -> Reply:
+    if model.engine == 'llamacpp':
+        from . import llamacpp
+        return llamacpp.chat(model, system, user, schema, max_tokens, timeout, temperature)
+    from . import llamacpp
+    llamacpp.release()               # an idle llama-server would share the GPU with the model Ollama loads now
     check_local(model)
     t = time.time()
     USED.add((model.url, model.name))
@@ -130,6 +141,8 @@ def unload_used() -> None:
     """Called when the MCP server exits (the agent session ended): nothing stays in memory after it."""
     for url, name in list(USED):
         unload(name, url)
+    from . import llamacpp
+    llamacpp.stop_owned()
 
 
 def unload_all(url='http://127.0.0.1:11434') -> list[str]:

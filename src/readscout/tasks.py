@@ -14,8 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import paths
-from . import paths as paths_mod     # `paths` is also the name of the tools' file-list argument
+from . import llamacpp, paths
 from .backend import UNLOAD_AFTER, BackendError, Model, chat, ensure_ollama, installed_models
 from .text import AccessError, Line, chunk, is_sensitive, load_lines, locate, outside, render, resolve
 
@@ -31,6 +30,8 @@ def load_config():
 
 
 def model_for(cfg, tier: str) -> Model:
+    if llamacpp.engine_of(cfg, tier) == 'llamacpp':
+        return llamacpp.model(cfg, tier)
     url = cfg.get('ollama_url', 'http://127.0.0.1:11434')
     ensure_ollama(url)
     spec = cfg['models'].get(tier) or cfg['models']['fast']
@@ -49,7 +50,10 @@ def model_for(cfg, tier: str) -> Model:
             missing = spec['name'] not in installed_models(url)
         except BackendError:
             missing = False
-        if missing:
+        if missing and llamacpp.engine_of(cfg, 'fast') == 'llamacpp':
+            model = llamacpp.model(cfg, 'fast')
+            model.note = f'quality model {spec["name"]} not installed, used the fast one ({paths.cli()} pull {spec["name"]})'
+        elif missing:
             # A missing quality model must not turn a question into an error: answer with the fast one and say so.
             fast = cfg['models']['fast']
             model = Model(name=fast['name'], ctx=fast.get('ctx', 32768), url=url, keep_alive=keep)
@@ -62,10 +66,10 @@ def project_of(path: Path, roots: list[Path]) -> Path | None:
     return max((r.resolve() for r in roots if real.is_relative_to(r.resolve())), key=lambda r: len(r.parts), default=None)
 
 
-def expand(paths: list[str], roots: list[Path], allowed: list[Path] | None = None) -> list[str]:
+def expand(files: list[str], roots: list[Path], allowed: list[Path] | None = None) -> list[str]:
     """Accept files and directories (walked recursively for text files). Excluded and sensitive folders are never entered."""
     out = []
-    for p in paths:
+    for p in files:
         cand = Path(p) if Path(p).is_absolute() else next((r / p for r in roots if (r / p).exists()), Path(p))
         if cand.is_dir():
             if outside(cand.resolve(), allowed):
@@ -81,11 +85,11 @@ def expand(paths: list[str], roots: list[Path], allowed: list[Path] | None = Non
     return out
 
 
-def gather(paths, roots, allowed=None):
+def gather(given, roots, allowed=None):
     lines, total = [], 0
-    explicit = set(paths)
+    explicit = set(given)
     files = []
-    for p in expand(paths, roots, allowed):
+    for p in expand(given, roots, allowed):
         try:
             real, shown = resolve(p, roots, allowed)
         except AccessError:
@@ -279,7 +283,8 @@ def _clean(text: str, limit=300) -> str:
 def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str) -> str:
     note = f' ({model.note})' if model.note else ''
     head = (f'[{label} · {model.name}{note} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
-            f'{len(out.verified)} verified quote(s), {out.dropped} dropped (quote not found in source)]')
+            f'{len(out.verified)} verified quote(s), {out.dropped} dropped (quote not found in source) · '
+            f'quotes are verified, sentences are the model\'s]')
     lines = [head]
     if out.summary:
         lines.append('Summary (unverified, model-written): ' + no_em_dash(_clean(out.summary, 1500)))
@@ -304,16 +309,20 @@ def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str)
 NEGATION = re.compile(r"(?i)\b(without|not|no|missing|lacks?|lacking|never|except|sans|pas|aucune?|manque|jamais|hormis|sauf)\b|\bn['’]|n['’]t\b")
 
 
+# Phrases with a negation word that do not ask for what is missing: they must not send a question to the slower model.
+NOT_A_NEGATION = re.compile(r"(?i)\b(?:whether or not|or not|not only|no matter|n['’]importe|ou pas|ou non|non seulement)\b")
+
+
 def pick_tier(question: str, quality: bool | None) -> str:
     if quality is not None:
         return 'quality' if quality else 'fast'
-    return 'quality' if NEGATION.search(question) else 'fast'
+    return 'quality' if NEGATION.search(NOT_A_NEGATION.sub(' ', question)) else 'fast'
 
 
-def ask(paths: list[str], question: str, mode='find', quality: bool | None = None, max_items=40) -> str:
+def ask(files: list[str], question: str, mode='find', quality: bool | None = None, max_items=40) -> str:
     cfg, roots = load_config()
     tier = pick_tier(question, quality)
-    lines = gather(paths, roots, paths_mod.allowed_folders(cfg))
+    lines = gather(files, roots, paths.allowed_folders(cfg))
     nbytes = sum(len(l.text) + 1 for l in lines)
     model = model_for(cfg, tier)
     out = run_ask(lines, question, model, mode)
@@ -357,7 +366,7 @@ DIGEST_QUESTION = ('What went wrong? Give first the earliest root-cause error, t
 
 def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     cfg, roots = load_config()
-    lines = load_lines(path, roots, allowed=paths_mod.allowed_folders(cfg))
+    lines = load_lines(path, roots, allowed=paths.allowed_folders(cfg))
     model = model_for(cfg, tier)
     nbytes = sum(len(l.text) + 1 for l in lines)
     kept = prefilter(lines) if nbytes > 20_000 else lines

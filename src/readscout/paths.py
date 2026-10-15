@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
         'quality': {'name': 'gemma4:26b', 'ctx': 32768},
     },
     'ollama_url': 'http://127.0.0.1:11434',
+    'engine': 'ollama',          # or 'llamacpp' (`readscout engine`)
 }
 
 
@@ -77,9 +78,10 @@ def save_config(cfg: dict) -> None:
 
 
 @contextlib.contextmanager
-def config_lock(timeout=10.0, stale=30.0):
-    """Serialize read-modify-write cycles of the config between processes (MCP servers, the web page, the CLI)."""
-    lock = home() / 'config.lock'
+def config_lock(timeout=10.0, stale=30.0, name='config'):
+    """Serialize read-modify-write cycles of the config between processes (MCP servers, the web page, the CLI).
+    `name` gives other shared files (the llama.cpp server state) their own lock."""
+    lock = home() / f'{name}.lock'
     deadline = time.time() + timeout
     while True:
         try:
@@ -93,7 +95,7 @@ def config_lock(timeout=10.0, stale=30.0):
             except OSError:
                 pass
             if time.time() > deadline:
-                raise TimeoutError('readscout config is locked by another process')
+                raise TimeoutError(f'readscout {name} is locked by another process')
             time.sleep(0.05)
     try:
         yield

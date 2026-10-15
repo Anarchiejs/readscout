@@ -1,7 +1,7 @@
 """The command line, with Ollama, the hardware probe and the agents stubbed out."""
 import pytest
 
-from readscout import agents, backend, cli, editing, hardware, paths, tasks
+from readscout import agents, backend, cli, editing, hardware, llamacpp, paths, tasks
 from readscout.hardware import Hardware
 
 REC = {'fast': {'model': 'small', 'download_gb': 3, 'why': 'fits', 'ctx': 32768},
@@ -31,6 +31,33 @@ def test_doctor_all_good(capsys):
     assert cli.main(['doctor']) == 0
     out = capsys.readouterr().out
     assert 'All good.' in out and 'any folder the agent names' in out and 'gate commands: on' in out
+    assert 'readscout gate off' in out                 # the gate risk is said while gate commands are allowed
+    assert cli.main(['gate', 'off']) == 0 and cli.main(['doctor']) == 0
+    assert 'readscout gate off' not in capsys.readouterr().out
+
+
+def test_doctor_with_llamacpp(monkeypatch, tmp_path, capsys):
+    f = tmp_path / 'small.gguf'
+    f.write_bytes(b'GGUF')
+    monkeypatch.setattr(llamacpp, 'binary', lambda cfg: None)
+    assert cli.main(['engine', 'llamacpp', '--fast', str(f), '--quality', str(f)]) == 0
+    capsys.readouterr()
+    assert cli.main(['doctor']) == 1
+    out = capsys.readouterr().out
+    assert 'FAIL llama-server found' in out and f'OK   fast model file {f}' in out and 'Ollama' not in out
+
+
+def test_doctor_with_mixed_engines_checks_each_model_on_its_engine(monkeypatch, tmp_path, capsys):
+    f = tmp_path / 'big.gguf'
+    f.write_bytes(b'GGUF')
+    monkeypatch.setattr(llamacpp, 'binary', lambda cfg: 'llama-server')
+    monkeypatch.setattr(backend, 'installed_models', lambda url: {'gemma4:e4b'})      # the 26B only exists as a .gguf
+    assert cli.main(['engine', 'llamacpp', '--quality', str(f)]) == 0
+    capsys.readouterr()
+    assert cli.main(['doctor']) == 0
+    out = capsys.readouterr().out
+    assert f'OK   quality model file {f}' in out and 'OK   fast model gemma4:e4b installed' in out
+    assert 'quality model gemma4:26b' not in out
 
 
 def test_doctor_reports_missing_model_and_agent(monkeypatch, capsys):

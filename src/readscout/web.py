@@ -11,8 +11,10 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qsl
 
-from . import __version__, agents, backend, hardware, paths, stats
+from . import __version__, agents, backend, hardware, llamacpp, paths, stats
 
 TOKEN = secrets.token_urlsafe(24)
 PULLS: dict[str, dict] = {}
@@ -46,6 +48,24 @@ def _cached(key, ttl, fn):
     return value
 
 
+def engines(cfg) -> dict:
+    """What runs each tier: Ollama, or llama.cpp (a model file or the user's own llama-server)."""
+    on_llamacpp = llamacpp.tiers(cfg)
+    used = {}
+    for tier, spec in cfg['models'].items():
+        found = on_llamacpp.get(tier)
+        if found:
+            gguf = found.get('gguf', '')
+            used[tier] = {'engine': 'llamacpp', 'name': found.get('name') or Path(gguf).stem or found.get('url', ''),
+                          'ready': bool(found.get('url')) or Path(gguf).expanduser().is_file()}
+        else:
+            used[tier] = {'engine': 'ollama', 'name': spec['name']}
+    exe = llamacpp.binary(cfg) if on_llamacpp else None
+    found = _cached('llamacpp-devices', 300, lambda: llamacpp.devices(cfg)) if exe else []
+    return {'used': used, 'llamacpp': {'binary': exe, 'devices': [f'{d} {n}' for d, n, _ in found],
+                                       'notes': llamacpp.device_notes(found, _cached('hardware', 3600, hardware.detect).source) if exe else []}}
+
+
 def state(vram=None, ram=None) -> dict:
     cfg = paths.load_config()
     url = cfg['ollama_url']
@@ -59,7 +79,7 @@ def state(vram=None, ram=None) -> dict:
             'recommended': hardware.recommend(v, r), 'catalog': hardware.catalog()['models'],
             'ollama': {'count': count if version else 0, 'version': version, 'binary': backend.ollama_binary(),
                        'installed': installed, 'loaded': backend.loaded_models(url) if version else []},
-            'config': {'models': cfg['models']},
+            'config': {'models': cfg['models'], 'engine': cfg.get('engine', 'ollama'), **engines(cfg)},
             'agents': _cached('agents', 30, agents.status), 'pulls': PULLS, 'stats': stats.summary(30)}
 
 
@@ -95,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._local():
             return self._send(403, {'error': 'forbidden'})
         path, _, query = self.path.partition('?')
-        q = dict(p.split('=', 1) for p in query.split('&') if '=' in p)
+        q = dict(parse_qsl(query))
         if path in ('/', '/setup'):
             html = PAGE.read_text(encoding='utf-8').replace('__TOKEN__', TOKEN).replace('__VIEW__', 'setup' if path == '/setup' else 'usage')
             return self._send(200, html, 'text/html')

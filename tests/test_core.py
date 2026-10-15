@@ -153,6 +153,11 @@ def test_pick_tier_routes_negations_to_quality():
     assert tasks.pick_tier("Quelles routes n'ont pas de limite ?", None) == 'quality'
     assert tasks.pick_tier('List every route', None) == 'fast'
     assert tasks.pick_tier('What does the node module do?', None) == 'fast'
+    for plain in ('Which functions check whether or not the user is admin?', 'Is caching enabled or not?',
+                  'List not only routes but also middlewares', "Où peut-on passer n'importe quel paramètre ?",
+                  'Le cache est-il activé ou pas ?'):
+        assert tasks.pick_tier(plain, None) == 'fast', plain
+    assert tasks.pick_tier('Which routes are not protected, whether or not they are public?', None) == 'quality'
     assert tasks.pick_tier('List every route', True) == 'quality'
     assert tasks.pick_tier('Which routes lack auth?', False) == 'fast'
 

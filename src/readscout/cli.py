@@ -10,6 +10,7 @@
   readscout edit PATH... -i TEXT        same as local_edit  [--gate "cmd args"]...
   readscout folders [add|remove PATH...] limit the local models to these folders (empty list: any folder)
   readscout gate on|off                 allow or forbid the gate commands of local_edit
+  readscout engine [ollama|llamacpp]    which engine runs each model  [--fast X.gguf|ollama:NAME|ollama] [--quality ...] [--args "..."]
   readscout stats [--days N]            what delegation read locally instead of your agent
   readscout dashboard                   open the usage page
   readscout warm [fast|quality]         preload a model
@@ -24,8 +25,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import __version__, agents, backend, editing, hardware, paths, stats, tasks
-
+from . import __version__, agents, backend, editing, hardware, llamacpp, paths, stats, tasks
 
 def doctor() -> int:
     ok = True
@@ -36,6 +36,49 @@ def doctor() -> int:
         print(f'{"OK  " if good else "FAIL"} {label}' + (f'  -> {hint}' if hint and not good else ''))
 
     cfg = paths.load_config()
+    on_llamacpp = llamacpp.tiers(cfg)
+    if cfg.get('engine') == 'llamacpp':
+        doctor_llamacpp(cfg, line)
+    if any(t not in on_llamacpp for t in cfg['models']):
+        doctor_ollama(cfg, line, [t for t in cfg['models'] if t not in on_llamacpp])
+    line(paths.config_file().exists(), f'config at {paths.config_file()}', 'readscout setup')
+    allowed = paths.allowed_folders(cfg)
+    print(f'     folders: {", ".join(str(f) for f in allowed) if allowed else "any folder the agent names"}'
+          f'; local_edit gate commands: {"on" if paths.gate_allowed(cfg) else "off"}')
+    if paths.gate_allowed(cfg):
+        print(f'     note: {agents.GATE_NOTICE}')
+    st = agents.status()
+    if st['claude_cli']:
+        line(st['claude_wired'], 'Claude Code wired (plugin, or MCP + skill)', 'readscout install-agent claude')
+    if st['codex_config']:
+        line(st['codex_mcp'] and st['codex_skill'], 'Codex wired (MCP + skill)', 'readscout install-agent codex')
+    if not st['claude_cli'] and not st['codex_config']:
+        line(False, 'no coding agent found', 'install Claude Code or Codex, then readscout install-agent ...')
+    print('\nAll good.' if ok else '\nFix the FAIL lines above.')
+    return 0 if ok else 1
+
+
+def doctor_llamacpp(cfg, line):
+    exe = llamacpp.binary(cfg)
+    line(exe, f'llama-server found ({exe or "not found"})', 'winget install llama.cpp / brew install llama.cpp, or readscout engine ollama')
+    if exe:
+        found = llamacpp.devices(cfg)
+        print('     llama-server devices: ' + (', '.join(f'{d} {n} ({mib // 1024} GB)' for d, n, mib in found) or 'none (CPU only)'))
+        for note in llamacpp.device_notes(found, hardware.detect().source):
+            print(f'     note: {note}')
+    tiers = llamacpp.tiers(cfg)
+    line(tiers, 'a model configured for llama.cpp', 'readscout engine llamacpp --quality <file.gguf>, or readscout engine ollama')
+    for tier, spec in tiers.items():
+        if spec.get('gguf'):
+            f = Path(spec['gguf']).expanduser()
+            line(f.is_file(), f'{tier} model file {f}', f'readscout engine llamacpp --{tier} <file.gguf>')
+        elif spec.get('url'):
+            line(llamacpp.probe(spec['url']) == 'ok', f'{tier} model: your llama-server at {spec["url"]} answers', 'start it')
+        else:
+            line(False, f'{tier} model: no .gguf file or url', f'readscout engine llamacpp --{tier} <file.gguf>')
+
+
+def doctor_ollama(cfg, line, tiers):
     url = cfg['ollama_url']
     line(backend.ollama_binary() or backend.health(url), 'Ollama installed', 'install it from https://ollama.com, or run the readscout installer')
     version = backend.health(url)
@@ -48,21 +91,9 @@ def doctor() -> int:
     line(version, f'Ollama running ({version or "not running"})', 'start the Ollama app')
     if version:
         have = backend.installed_models(url)
-        for tier, spec in cfg['models'].items():
+        for tier in tiers:
+            spec = cfg['models'][tier]
             line(spec['name'] in have, f'{tier} model {spec["name"]} installed', f'readscout pull {spec["name"]}')
-    line(paths.config_file().exists(), f'config at {paths.config_file()}', 'readscout setup')
-    allowed = paths.allowed_folders(cfg)
-    print(f'     folders: {", ".join(str(f) for f in allowed) if allowed else "any folder the agent names"}'
-          f'; local_edit gate commands: {"on" if paths.gate_allowed(cfg) else "off"}')
-    st = agents.status()
-    if st['claude_cli']:
-        line(st['claude_wired'], 'Claude Code wired (plugin, or MCP + skill)', 'readscout install-agent claude')
-    if st['codex_config']:
-        line(st['codex_mcp'] and st['codex_skill'], 'Codex wired (MCP + skill)', 'readscout install-agent codex')
-    if not st['claude_cli'] and not st['codex_config']:
-        line(False, 'no coding agent found', 'install Claude Code or Codex, then readscout install-agent ...')
-    print('\nAll good.' if ok else '\nFix the FAIL lines above.')
-    return 0 if ok else 1
 
 
 def print_stats(days):
@@ -106,6 +137,83 @@ def set_gate(state: str):
     paths.update_config(lambda c: c.__setitem__('allow_gate', state == 'on'))
     print('local_edit may run gate commands (the project tests) chosen by the agent.' if state == 'on' else
           'local_edit gate commands are off: the agent must run its checks itself.')
+
+
+def show_engines(cfg) -> None:
+    on_llamacpp = llamacpp.tiers(cfg)
+    for tier in dict.fromkeys([*cfg['models'], *on_llamacpp]):
+        spec = on_llamacpp.get(tier)
+        if spec:
+            print(f'  {tier:8} llamacpp  {spec.get("gguf") or spec.get("url")}  ctx {spec.get("ctx", hardware.DEFAULT_CTX)}')
+        else:
+            print(f'  {tier:8} ollama    {cfg["models"][tier]["name"]}')
+    if on_llamacpp:
+        lc = llamacpp.settings(cfg)
+        print(f'  llama-server: {llamacpp.binary(cfg) or "NOT FOUND"}' + (f', extra flags: {" ".join(lc["args"])}' if lc.get('args') else ''))
+
+
+def engine(name, fast, quality, args, binary) -> int:
+    if name is None:
+        print('engine per model:')
+        show_engines(paths.load_config())
+        return 0
+    if name == 'ollama':
+        paths.update_config(lambda c: c.__setitem__('engine', 'ollama'))
+        print('engine: ollama for every model. Restart your coding agent so its readscout server uses it.')
+        return 0
+    given: dict = {}
+    for tier, value in (('fast', fast), ('quality', quality)):
+        if not value:
+            continue
+        if value == 'ollama':
+            given[tier] = None                                  # this tier goes back to Ollama
+        elif value.startswith(('http://', 'https://')):
+            try:
+                backend.Model('llama-server', url=value)        # loopback only
+            except backend.BackendError as e:
+                print(e)
+                return 1
+            given[tier] = {'url': value}
+        elif value.startswith('ollama:'):
+            try:
+                given[tier] = {'gguf': llamacpp.ollama_gguf(value.removeprefix('ollama:')), 'name': value.removeprefix('ollama:')}
+            except (backend.BackendError, OSError, subprocess.SubprocessError) as e:
+                print(e)
+                return 1
+        else:
+            f = Path(value).expanduser().resolve()
+            if not f.is_file() or f.suffix.lower() != '.gguf':
+                print(f'Not a .gguf file: {value}')
+                return 1
+            given[tier] = {'gguf': str(f)}
+
+    def apply(c):
+        lc = c.setdefault('llamacpp', {})
+        models = lc.setdefault('models', {})
+        for tier, spec in given.items():
+            if spec is None:
+                models.pop(tier, None)
+                continue
+            spec['ctx'] = c['models'].get(tier, {}).get('ctx', hardware.DEFAULT_CTX)
+            models[tier] = spec
+        if args is not None:
+            lc['args'] = shlex.split(args, posix=sys.platform != 'win32')
+        if binary:
+            lc['binary'] = str(Path(binary).expanduser().resolve())
+        c['engine'] = 'llamacpp' if models else 'ollama'
+    cfg = paths.update_config(apply)
+    if not llamacpp.tiers(cfg):
+        print('engine: ollama for every model. To run one on llama.cpp: readscout engine llamacpp --quality ollama:gemma4:26b')
+        return 0 if any(v is None for v in given.values()) else 1
+    print('engine per model:')
+    show_engines(cfg)
+    print('readscout starts llama-server itself when a llama.cpp model is needed and stops it when idle.'
+          + (' The other models stay on Ollama; the two engines take turns on the GPU.'
+             if any(t not in llamacpp.tiers(cfg) for t in cfg['models']) else ''))
+    if not llamacpp.binary(cfg):
+        print('llama-server was not found: install llama.cpp (winget install llama.cpp, brew install llama.cpp) or pass --binary')
+    print('Restart your coding agent so its readscout server uses the new engines.')
+    return 0
 
 
 def print_hardware():
@@ -187,10 +295,18 @@ def main(argv=None):
     p.add_argument('folders', nargs='*')
     p = sub.add_parser('gate')
     p.add_argument('state', choices=['on', 'off'])
+    p = sub.add_parser('engine')
+    p.add_argument('name', nargs='?', choices=['ollama', 'llamacpp'])
+    p.add_argument('--fast', help='run the fast model on llama.cpp: a .gguf file, ollama:<model> (reuse what Ollama downloaded), '
+                   'or the URL of your own llama-server; "ollama" puts it back on Ollama. A model not named keeps its engine')
+    p.add_argument('--quality', help='quality model: same choices as --fast')
+    p.add_argument('--args', default=None, help='extra llama-server flags, e.g. "--n-cpu-moe 30"')
+    p.add_argument('--binary', help='path of llama-server when it is not on the PATH')
     p = sub.add_parser('stats')
     p.add_argument('--days', type=int, default=30)
     p = sub.add_parser('bench')
-    p.add_argument('--models', default='', help='comma-separated Ollama models (default: your fast and quality models)')
+    p.add_argument('--models', default='', help='comma-separated Ollama models, or llamacpp:fast, llamacpp:quality, '
+                   'llamacpp:<file.gguf> (default: your fast and quality models, each on its engine)')
     p.add_argument('--only', default='', help='comma-separated families')
     p.add_argument('--no-edits', action='store_true')
     sub.add_parser('stop')
@@ -227,18 +343,25 @@ def main(argv=None):
         return folders(a.action, a.folders)
     elif a.cmd == 'gate':
         set_gate(a.state)
+    elif a.cmd == 'engine':
+        return engine(a.name, a.fast, a.quality, a.args, a.binary)
     elif a.cmd == 'stats':
         print_stats(a.days)
     elif a.cmd == 'bench':
         from .bench import runner
         cfg = paths.load_config()
-        models = [m for m in a.models.split(',') if m] or list(dict.fromkeys(s['name'] for s in cfg['models'].values()))
+        default = list(dict.fromkeys('llamacpp:' + t if llamacpp.engine_of(cfg, t) == 'llamacpp' else s['name']
+                                     for t, s in cfg['models'].items()))
+        models = [m for m in a.models.split(',') if m] or default
         report = runner.run(models, [f for f in a.only.split(',') if f] or None, not a.no_edits)
         print()
         print(runner.markdown(report))
         print(f"\nFull results: {report['file']}")
         print('Share them: https://github.com/Anarchiejs/readscout/issues/new?title=bench')
     elif a.cmd == 'stop':
+        served = llamacpp.stop_all()
+        if served:
+            print(f'Stopped llama-server ({served}).')
         url = paths.load_config()['ollama_url']
         if not backend.health(url):
             print('Ollama is not running: no model is in memory.')

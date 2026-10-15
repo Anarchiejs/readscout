@@ -87,13 +87,27 @@ def markdown(report) -> str:
     return '\n'.join(lines)
 
 
+def _llamacpp_model(cfg, name: str) -> backend.Model:
+    """llamacpp:fast, llamacpp:quality (the configured models) or llamacpp:<file.gguf>, at the benchmark's 32k context."""
+    from .. import llamacpp
+    what = name.removeprefix('llamacpp:')
+    m = llamacpp.model(cfg, what) if what in ('fast', 'quality') else llamacpp.from_spec(cfg, {'gguf': what})
+    m.ctx = 32768
+    m.name = name if what not in ('fast', 'quality') else f'llamacpp:{m.name}'
+    return m
+
+
 def run(models: list[str], families: list[str] | None = None, do_edits=True, progress=print) -> dict:
     os.environ['READSCOUT_NO_METRICS'] = '1'   # benchmark calls are not real usage
     cfg = paths.load_config()
     url = cfg['ollama_url']
-    backend.ensure_ollama(url)
-    have = backend.installed_models(url)
-    missing = [m for m in models if m not in have]
+    on_ollama = [m for m in models if not m.startswith('llamacpp:')]
+    have: set[str] = set()
+    if on_ollama:
+        backend.ensure_ollama(url)
+        have = backend.installed_models(url)
+    built = {m: _llamacpp_model(cfg, m) for m in models if m.startswith('llamacpp:')}
+    missing = [m for m in on_ollama if m not in have]
     if missing:
         raise SystemExit(f'Not installed: {", ".join(missing)} (readscout pull {" ".join(missing)})')
     progress('Preparing the corpus (first run downloads 4 pinned MIT-licensed repositories, about 2 MB)...')
@@ -102,16 +116,22 @@ def run(models: list[str], families: list[str] | None = None, do_edits=True, pro
         task_list = [t for t in task_list if t.family in families]
     read_rows, edit_rows = [], []
     for name in models:
-        model = backend.Model(name=name, url=url, ctx=32768)
-        progress(f'Reading tasks with {name} ({len(task_list)} tasks)')
+        model = built.get(name) or backend.Model(name=name, url=url, ctx=32768)
+        progress(f'Reading tasks with {model.name} ({len(task_list)} tasks)')
         read_rows += run_reading(model, task_list, progress)
         if do_edits:
-            progress(f'Edit tasks with {name} ({len(edits.TASKS)} tasks)')
+            progress(f'Edit tasks with {model.name} ({len(edits.TASKS)} tasks)')
             for r in edits.run(model, editing.edit):
-                edit_rows.append({'model': name, **r})
-                progress(f"  {name:16} edit:{r['task']:38} {r['status']:9} {r['score']:.2f}  {r['seconds']:5.1f}s")
+                edit_rows.append({'model': model.name, **r})
+                progress(f"  {model.name:16} edit:{r['task']:38} {r['status']:9} {r['score']:.2f}  {r['seconds']:5.1f}s")
+        # Free the GPU before the next model: Ollama keeps a model for a minute, and two engines would share 8 GB.
+        if model.engine == 'llamacpp':
+            from .. import llamacpp
+            llamacpp.stop_all()
+        else:
+            backend.unload(name, url)
     hw = hardware.detect()
-    report = {'readscout': __version__, 'date': time.strftime('%Y-%m-%d'), 'ollama': backend.health(url),
+    report = {'readscout': __version__, 'date': time.strftime('%Y-%m-%d'), 'ollama': backend.health(url) if on_ollama else None,
               'platform': platform.platform(), 'hardware': hardware.as_dict(hw), 'corpus': 'v1', 'tasks': len(task_list),
               'summary': summarize(read_rows, edit_rows), 'reading': read_rows, 'edits': edit_rows}
     out_dir = paths.home() / 'bench-results'

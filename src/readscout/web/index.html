@@ -34,7 +34,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;
 <nav><button id="t-setup" onclick="show('setup')">Setup</button><button id="t-usage" onclick="show('usage')">Usage</button></nav></header>
 
 <section id="setup">
-  <h2>1. Ollama</h2><div class="card" id="ollama">...</div>
+  <h2>1. Engines</h2><div class="card" id="ollama">...</div>
 
   <h2>2. Your machine</h2>
   <div class="card">
@@ -79,9 +79,12 @@ async function load(){
 function render(){
   $('ver').textContent='v'+S.version;
   const o=S.ollama;
-  $('ollama').innerHTML=o.version?`<span class="ok">&#9679;</span> Ollama ${esc(o.version)} is running. ${o.count} model(s) installed.`
+  const used=S.config.used,lc=S.config.llamacpp,onLc=Object.entries(used).filter(([t,u])=>u.engine==='llamacpp'),onOl=Object.values(used).some(u=>u.engine==='ollama');
+  $('ollama').innerHTML=(o.version?`<span class="ok">&#9679;</span> Ollama ${esc(o.version)} is running. ${o.count} model(s) installed.`
    :o.binary?`<span class="warn">&#9679;</span> Ollama is installed but not running. It starts automatically on first use, or start the Ollama app now.`
-   :`<span class="bad">&#9679;</span> Ollama is not installed. Run the readscout installer again, or install it from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com</a>, then reload this page.`;
+   :`<span class="${onOl?'bad':'mut'}">&#9679;</span> Ollama is not installed. Run the readscout installer again, or install it from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com</a>, then reload this page.`)
+   +(onLc.length?`<div style="margin-top:6px">${lc.binary?'<span class="ok">&#9679;</span>':'<span class="bad">&#9679;</span>'} llama.cpp runs ${onLc.map(([t,u])=>esc(t)+' ('+esc(u.name)+')').join(', ')}. ${lc.binary?'llama-server: '+esc(lc.binary)+(lc.devices.length?'<br>Devices: '+lc.devices.map(esc).join(', '):'<br>Devices: none (CPU only)'):'llama-server was not found: install llama.cpp, or run <code>readscout engine ollama</code>.'}${lc.notes.map(n=>'<div class="warn" style="font-size:13px;margin-top:4px">'+esc(n)+'</div>').join('')}</div>`
+    :'<div class="mut" style="font-size:13px;margin-top:6px">Optional: <code>readscout engine llamacpp</code> runs a model on llama.cpp (faster for big reads with the 26B model; see the README).</div>');
   const h=S.hardware;$('hw').innerHTML=`Detected: <b>${esc(h.gpu)}</b>${h.vram_gb?`, ${h.vram_gb} GB VRAM`:''} (via ${esc(h.source)}), <b>${h.ram_gb} GB RAM</b>, ${esc(h.os)}.`;
   if(!dirty){$('vram').value=S.chosen.vram_gb;$('ram').value=S.chosen.ram_gb}
   $('vv').textContent=$('vram').value;$('rv').textContent=$('ram').value;
@@ -94,14 +97,15 @@ function render(){
       <div style="font-size:13px;margin-top:6px">${esc(r.why)}</div>
       <div class="row" style="margin-top:10px">${have?'<span class="ok">&#10003; Installed</span>':p&&!p.done?`<span class="mut">${esc(p.status)} ${pct}%</span>`:p&&p.error?`<span class="bad">${esc(p.error)}</span> <button class="g" onclick="pull('${esc(r.model)}')">Retry</button>`:`<button class="b" ${S.ollama.version||S.ollama.binary?'':'disabled'} onclick="pull('${esc(r.model)}')">Install</button>`}</div>
       ${p&&!p.done?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>`}).join('');
-  const m=S.config.models;$('cur').textContent=`Currently used: fast = ${m.fast.name}, quality = ${m.quality.name}`;
+  const eng=u=>u.engine==='llamacpp'?'llama.cpp':'Ollama';$('cur').textContent=`Currently used: fast = ${used.fast.name} (${eng(used.fast)}), quality = ${used.quality.name} (${eng(used.quality)})`;
   $('envcard').style.display=S.hardware.os==='windows'?'':'none';
   const a=S.agents;
   $('agents').innerHTML=[['claude','Claude Code',a.claude_cli,a.claude_wired,'Install Claude Code first.'],['codex','Codex',a.codex_config,a.codex_mcp&&a.codex_skill,'Run Codex once first (it creates ~/.codex).']]
    .map(([k,n,present,wired,hint])=>`<div class="card"><div class="row"><b>${n}</b>${wired?'<span class="ok">&#10003; connected</span>':present?'<span class="mut">not connected</span>':'<span class="mut">not found</span>'}</div>
      <div class="mut" style="font-size:13px">${present?'Registers the readscout MCP server and copies the skill. Restart the agent afterwards.':hint}</div>
      <div class="row" style="margin-top:8px">${k==='claude'&&a.claude_plugin?'<span class="mut">via the readscout plugin</span>':wired?`<button class="g" onclick="agent('${k}','uninstall')">Disconnect</button>`:`<button class="b" ${present?'':'disabled'} onclick="agent('${k}','install')">Connect</button>`}</div></div>`).join('');
-  const chk=[[!!o.version,'Ollama running'],[inst.has(m.fast.name),`fast model ${m.fast.name} installed`],[inst.has(m.quality.name),`quality model ${m.quality.name} installed`],
+  const chk=[...(onOl?[[!!o.version,'Ollama running']]:[]),...(onLc.length?[[!!lc.binary,'llama-server found']]:[]),
+    ...['fast','quality'].map(t=>used[t].engine==='llamacpp'?[used[t].ready,`${t} model file ${used[t].name} found`]:[inst.has(used[t].name),`${t} model ${used[t].name} installed`]),
     [a.claude_wired||(a.codex_mcp&&a.codex_skill),'at least one agent connected']];
   $('check').innerHTML=chk.map(([g,t])=>`<div><span class="${g?'ok':'bad'}">${g?'&#10003;':'&#10007;'}</span> ${esc(t)}</div>`).join('')+(chk.every(c=>c[0])?'<p class="ok"><b>Ready.</b> Restart your agent and work as usual; it will delegate large reads by itself.</p>':'');
   const s=S.stats;

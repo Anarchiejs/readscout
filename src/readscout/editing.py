@@ -10,7 +10,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import paths as paths_mod     # `paths` is also the name of the tool's file-list argument
+from . import paths
 from .backend import BackendError, Model, chat
 from .tasks import _clean, load_config, model_for, no_em_dash, project_of, record
 from .text import AccessError, is_sensitive, outside, redact, resolve
@@ -94,10 +94,10 @@ def _write_atomic(path: Path, data: bytes):
         tmp.unlink(missing_ok=True)
 
 
-def _edit_targets(paths: list[str], roots: list[Path], allowed: list[Path]) -> dict[str, Path]:
+def _edit_targets(files: list[str], roots: list[Path], allowed: list[Path]) -> dict[str, Path]:
     """Display path -> real path for every file of the call, existing or to be created."""
     targets: dict[str, Path] = {}
-    for p in paths:
+    for p in files:
         try:
             real, shown = resolve(p, roots, allowed)
         except AccessError:
@@ -223,16 +223,16 @@ def _diff(targets, original, current) -> tuple[str, int, int]:
     return diff, plus, minus
 
 
-def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None, tier='quality', timeout=300,
+def edit(files: list[str], instruction: str, gate: list[list[str]] | None = None, tier='quality', timeout=300,
          model: Model | None = None, roots: list[Path] | None = None) -> str:
     cfg, cfg_roots = load_config() if roots is None else ({}, roots)
     roots = cfg_roots or [Path.cwd().resolve()]
     gate = _check_gate(gate)
-    if gate and not paths_mod.gate_allowed(cfg):
+    if gate and not paths.gate_allowed(cfg):
         raise AccessError('gate commands are disabled by the user (`readscout gate off`): call local_edit without a gate '
                           'and run the checks yourself')
     model = model or model_for(cfg, tier)
-    targets = _edit_targets(paths, roots, paths_mod.allowed_folders(cfg))
+    targets = _edit_targets(files, roots, paths.allowed_folders(cfg))
     project = _gate_folder(targets, roots)
     raw, original = _read_originals(targets)
     tx = _Transaction(targets, raw)
@@ -241,11 +241,11 @@ def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None
         record({'tool': 'edit', 'model': model.name, 'status': status, 'attempts': attempts,
                 'seconds': round(time.time() - started, 1), **extra})
 
-    files = '\n\n'.join(f'===== FILE {k} =====\n{t if t is not None else "(new file, does not exist yet)"}' for k, t in original.items())
+    prompt_files = '\n\n'.join(f'===== FILE {k} =====\n{t if t is not None else "(new file, does not exist yet)"}' for k, t in original.items())
     feedback, started, attempts, log = '', time.time(), 0, []
     for attempts in (1, 2):
         try:
-            reply = chat(model, EDIT_SYSTEM, f'{files}\n\nCHANGE TO MAKE:\n{instruction}{feedback}', EDIT_SCHEMA,
+            reply = chat(model, EDIT_SYSTEM, f'{prompt_files}\n\nCHANGE TO MAKE:\n{instruction}{feedback}', EDIT_SCHEMA,
                          max_tokens=6000, timeout=timeout)
         except BackendError as e:
             log.append(str(e)[:200])
