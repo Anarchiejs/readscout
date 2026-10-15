@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from .paths import PACKAGE
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+DEFAULT_CTX = 32768
 
 
 @dataclass
@@ -114,11 +115,16 @@ def recommend(vram_gb: float, ram_gb: float) -> dict:
         for rule in cat['tiers'][tier]:
             if vram_gb >= rule.get('min_vram_gb', 0) and ram_gb >= rule.get('min_ram_gb', 0) \
                     and vram_gb + ram_gb >= rule.get('min_total_gb', 0):
-                picks[tier] = {**cat['models'][rule['model']], 'model': rule['model'], 'why': rule['why']}
+                picks[tier] = {**cat['models'][rule['model']], 'model': rule['model'], 'why': rule['why'], 'ctx': rule.get('ctx', DEFAULT_CTX)}
                 break
     if 'quality' not in picks and 'fast' in picks:
         picks['quality'] = {**picks['fast'], 'why': 'Not enough memory for a bigger model: the fast model is used for both tiers.'}
     return picks
+
+
+def models_config(rec: dict) -> dict:
+    """The `models` section of the config for a recommendation: model name and context size per tier."""
+    return {tier: {'name': r['model'], 'ctx': r.get('ctx', DEFAULT_CTX)} for tier, r in rec.items()}
 
 
 def ensure_config() -> None:
@@ -129,7 +135,7 @@ def ensure_config() -> None:
     cfg = paths.load_config()
     hw = detect()
     rec = recommend(hw.vram_gb, hw.ram_gb)
-    cfg['models'] = {tier: {'name': r['model'], 'ctx': 32768} for tier, r in rec.items()}
+    cfg['models'] = models_config(rec)
     paths.save_config(cfg)
 
 

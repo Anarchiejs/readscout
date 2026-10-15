@@ -139,6 +139,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {'ok': True})
         if self.path == '/api/models':
             chosen = {}
+            try:
+                rec = hardware.recommend(float(body['vram']), float(body['ram'])) if 'vram' in body and 'ram' in body else {}
+            except (TypeError, ValueError):
+                return self._send(400, {'error': 'invalid vram or ram'})
             for tier in ('fast', 'quality'):
                 name = body.get(tier)
                 if name is None:
@@ -149,7 +153,9 @@ class Handler(BaseHTTPRequestHandler):
 
             def apply(c):
                 for tier, name in chosen.items():
-                    c['models'][tier] = {'name': name, 'ctx': c['models'].get(tier, {}).get('ctx', 32768)}
+                    # The context size follows the machine when the page sends it and the model is the recommended one.
+                    ctx = rec[tier]['ctx'] if tier in rec and rec[tier]['model'] == name else c['models'].get(tier, {}).get('ctx', hardware.DEFAULT_CTX)
+                    c['models'][tier] = {'name': name, 'ctx': ctx}
             paths.update_config(apply)
             return self._send(200, {'ok': True})
         if self.path == '/api/agent':

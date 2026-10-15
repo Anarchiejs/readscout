@@ -83,7 +83,7 @@ def pull(models: list[str]):
         hw = hardware.detect()
         rec = hardware.recommend(hw.vram_gb, hw.ram_gb)
         models = sorted({r['model'] for r in rec.values()})
-        paths.update_config(lambda c: c.__setitem__('models', {t: {'name': r['model'], 'ctx': 32768} for t, r in rec.items()}))
+        paths.update_config(lambda c: c.__setitem__('models', hardware.models_config(rec)))
     for m in models:
         last = [0.0]
 

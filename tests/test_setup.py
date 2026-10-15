@@ -14,6 +14,10 @@ from readscout import agents, hardware, paths, web
     (6, 16, 'gemma4:e4b', 'gemma4:e4b'),     # too little memory for a second model
     (8, 31.1, 'gemma4:e4b', 'gemma4:26b'),   # the measured machine (Windows reports 31.1 GB for 32 GB)
     (12, 16, 'gemma4:e4b', 'gemma4:12b'),
+    (8, 16, 'gemma4:e4b', 'gemma4:12b'),     # the 12B runs partly from RAM on 8 GB (measured with 32 GB)
+    (12, 8, 'gemma4:e4b', 'gemma4:12b'),
+    (16, 8, 'gemma4:e4b', 'gemma4:12b'),     # fits in the GPU, needs little RAM
+    (8, 32, 'gemma4:e4b', 'gemma4:26b'),
     (16, 32, 'gemma4:e4b', 'gemma4:26b'),
     (24, 64, 'gemma4:e4b', 'gemma4:26b'),
     (0, 16, 'gemma4:e2b', 'gemma4:e2b'),
@@ -105,3 +109,21 @@ def test_first_run_config_follows_the_hardware(monkeypatch):
     assert models['fast']['name'] == 'gemma4:e4b' and models['quality']['name'] == 'gemma4:e4b'
     hardware.ensure_config()   # never overwrites an existing config
     assert paths.load_config()['models'] == models
+
+
+def test_context_size_follows_the_machine():
+    small, mid, big = hardware.recommend(8, 32), hardware.recommend(16, 32), hardware.recommend(24, 64)
+    assert small['fast']['ctx'] == small['quality']['ctx'] == 32768        # tight on 8 GB: keep the measured size
+    assert mid['fast']['ctx'] == 65536 and mid['quality']['ctx'] == 32768  # the 26B already fills a 16 GB card
+    assert big['fast']['ctx'] == big['quality']['ctx'] == 65536
+    assert hardware.models_config(big)['quality'] == {'name': 'gemma4:26b', 'ctx': 65536}
+
+
+def test_web_applies_the_recommended_context(server):
+    body = {'fast': 'gemma4:e4b', 'quality': 'gemma4:26b', 'vram': 24, 'ram': 64}
+    assert _req(server, '/api/models', body, {'X-Readscout-Token': web.TOKEN})[0] == 200
+    assert paths.load_config()['models'] == {'fast': {'name': 'gemma4:e4b', 'ctx': 65536}, 'quality': {'name': 'gemma4:26b', 'ctx': 65536}}
+    body = {'fast': 'gemma4:e4b', 'quality': 'someone/else', 'vram': 8, 'ram': 32}
+    assert _req(server, '/api/models', body, {'X-Readscout-Token': web.TOKEN})[0] == 200
+    models = paths.load_config()['models']
+    assert models['fast']['ctx'] == 32768 and models['quality'] == {'name': 'someone/else', 'ctx': 65536}   # not recommended: kept

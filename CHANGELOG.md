@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Model recommendations.** The 12B is now offered from 8 GB of VRAM with 16 GB of RAM (it was measured on 8 GB of VRAM
+  with 32 GB of RAM) and from 10 GB of VRAM with 8 GB of RAM, instead of needing 15 GB of RAM.
+- **Context size follows the machine:** 64k tokens for big cards (fast model from 12 GB of VRAM, quality model from 24 GB
+  or, for the 12B, 14 GB), 32k otherwise. Not benchmarked yet.
+
 ## 0.1.4
 
 - **Windows installer:** it closes a running readscout (your agent's MCP server, the setup page) before reinstalling.

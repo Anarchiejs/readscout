@@ -208,10 +208,15 @@ Chosen per machine from [`catalog.json`](src/readscout/catalog.json), measured w
 | Your machine | Fast | Quality |
 |---|---|---|
 | less than ~6 GB VRAM | `gemma4:e2b` | `gemma4:e2b` |
-| 6-9 GB VRAM, less than ~30 GB RAM | `gemma4:e4b` | `gemma4:e4b` |
-| 10-14 GB VRAM, less than ~30 GB RAM | `gemma4:e4b` | `gemma4:12b` |
+| 6-7 GB VRAM | `gemma4:e4b` | `gemma4:e4b` |
+| 8-9 GB VRAM, 16 GB RAM | `gemma4:e4b` | `gemma4:12b` (part of it runs from RAM) |
+| 10 GB VRAM or more, 8 GB RAM or more, less than ~30 GB RAM | `gemma4:e4b` | `gemma4:12b` |
 | 6-14 GB VRAM, 32 GB RAM or more | `gemma4:e4b` | `gemma4:26b` (MoE, experts in RAM) |
-| 16 GB VRAM or more | `gemma4:e4b` | `gemma4:26b`, mostly on the GPU |
+| 15 GB VRAM or more, 16 GB RAM or more | `gemma4:e4b` | `gemma4:26b`, mostly on the GPU |
+
+The context size follows the machine too: 32k tokens by default, 64k for the fast model from 12 GB of VRAM, and for the
+quality model from 24 GB (26B) or 14 GB (12B). A bigger context means fewer chunks on big files; it has not been
+benchmarked yet, and you can change it in `config.json` (`models.<tier>.ctx`).
 
 On an RTX 4060 Ti 8 GB + 32 GB RAM ([docs/BENCHMARK.md](docs/BENCHMARK.md)): `gemma4:26b` and `gemma4:12b` score 0.91
 on 25 reading tasks from four pinned open-source repositories (about 20 s per task), `gemma4:e4b` 0.85 with 7/7 edits
