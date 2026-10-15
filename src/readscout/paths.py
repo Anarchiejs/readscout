@@ -75,7 +75,7 @@ def config_lock(timeout=10.0, stale=30.0):
         try:
             os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
             break
-        except FileExistsError:
+        except (FileExistsError, PermissionError):      # Windows reports a lock held by another process as PermissionError
             try:
                 if time.time() - lock.stat().st_mtime > stale:     # left behind by a crashed process
                     lock.unlink(missing_ok=True)
@@ -88,7 +88,12 @@ def config_lock(timeout=10.0, stale=30.0):
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        for _ in range(20):         # Windows refuses to delete a file another process is opening right now
+            try:
+                lock.unlink(missing_ok=True)
+                break
+            except OSError:
+                time.sleep(0.05)
 
 
 def update_config(mutate) -> dict:
