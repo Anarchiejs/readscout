@@ -194,7 +194,7 @@ TASKS = [
 
 
 def run(model, edit_fn) -> list[dict]:
-    """edit_fn(paths, instruction, gate, model, roots) -> receipt string (readscout.tasks.edit)."""
+    """edit_fn(paths, instruction, gate, model, roots) -> receipt string (readscout.editing.edit)."""
     rows = []
     for name, paths, instruction, check in TASKS:
         with tempfile.TemporaryDirectory() as d:

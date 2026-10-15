@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from readscout import tasks
+from readscout import editing, tasks
 from readscout.backend import Model, Reply
 from readscout.text import AccessError, redact, resolve
 
@@ -17,7 +17,9 @@ def two_folders(tmp_path, monkeypatch):
     (other / 'o.py').write_text('y = 2\n')
     cfg = {'models': {'quality': {'name': 'big'}, 'fast': {'name': 'small'}}, 'allowed_folders': [str(work)]}
     monkeypatch.setattr(tasks, 'load_config', lambda: (cfg, [work]))
+    monkeypatch.setattr(editing, 'load_config', tasks.load_config)
     monkeypatch.setattr(tasks, 'record', lambda entry: None)
+    monkeypatch.setattr(editing, 'record', lambda entry: None)
     monkeypatch.setattr(tasks, 'ensure_ollama', lambda url: None)
     monkeypatch.setattr(tasks, 'installed_models', lambda url: {'small', 'big'})
     return work, other, cfg
@@ -46,22 +48,22 @@ def test_ask_and_digest_follow_the_list(two_folders):
 
 def test_edit_follows_the_list_for_existing_and_new_files(two_folders, monkeypatch):
     work, other, _ = two_folders
-    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: Reply({'edits': [], 'summary': ''}, 1, 1, 0.1))
+    monkeypatch.setattr(editing, 'chat', lambda *a, **k: Reply({'edits': [], 'summary': ''}, 1, 1, 0.1))
     for target in (str(other / 'o.py'), str(other / 'new.py')):
         with pytest.raises(AccessError, match='allowed folders'):
-            tasks.edit([target], 'x')
+            editing.edit([target], 'x')
     assert not (other / 'new.py').exists()
 
 
 def test_gate_off_refuses_gate_commands_but_not_edits(two_folders, monkeypatch):
     work, _, cfg = two_folders
     cfg['allow_gate'] = False
-    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: Reply({'edits': [{'path': 'w.py', 'search': 'x = 1', 'replace': 'x = 3'}],
+    monkeypatch.setattr(editing, 'chat', lambda *a, **k: Reply({'edits': [{'path': 'w.py', 'search': 'x = 1', 'replace': 'x = 3'}],
                                                               'summary': 's'}, 1, 1, 0.1))
     with pytest.raises(AccessError, match='gate off'):
-        tasks.edit(['w.py'], 'x', [[sys.executable, '-c', 'pass']])
+        editing.edit(['w.py'], 'x', [[sys.executable, '-c', 'pass']])
     assert (work / 'w.py').read_text() == 'x = 1\n'
-    out = tasks.edit(['w.py'], 'x', None, model=Model('m'))
+    out = editing.edit(['w.py'], 'x', None, model=Model('m'))
     assert out.startswith('APPLIED') and 'NO gate' in out
 
 

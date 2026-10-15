@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from readscout import tasks
+from readscout import editing, tasks
 from readscout.backend import Model, Reply
 from readscout.text import AccessError, Line, load_lines, locate, redact, resolve
 
@@ -14,7 +14,9 @@ def project(tmp_path, monkeypatch):
     root.mkdir()
     (root / 'm.py').write_text('def f():\n    return 1\n')
     monkeypatch.setattr(tasks, 'load_config', lambda: ({'models': {'quality': {'name': 'big'}, 'fast': {'name': 'small'}}}, [root]))
+    monkeypatch.setattr(editing, 'load_config', tasks.load_config)
     monkeypatch.setattr(tasks, 'record', lambda entry: None)
+    monkeypatch.setattr(editing, 'record', lambda entry: None)
     monkeypatch.setattr(tasks, 'ensure_ollama', lambda url: None)
     monkeypatch.setattr(tasks, 'installed_models', lambda url: {'small', 'big'})
     return root
@@ -98,31 +100,31 @@ def test_edit_does_not_overwrite_a_change_made_meanwhile(project, monkeypatch):
     def slow(*a, **k):
         (project / 'm.py').write_text('def f():\n    return 42  # edited by the user\n')
         return Reply({'edits': [{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'}], 'summary': 's'}, 1, 1, 0.1)
-    monkeypatch.setattr(tasks, 'chat', slow)
-    assert tasks.edit(['m.py'], 'x').startswith('ESCALATE')
+    monkeypatch.setattr(editing, 'chat', slow)
+    assert editing.edit(['m.py'], 'x').startswith('ESCALATE')
     assert 'edited by the user' in (project / 'm.py').read_text()
 
 
 def test_edit_failed_gate_restores_only_its_own_writes(project, monkeypatch):
-    monkeypatch.setattr(tasks, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'}]))
+    monkeypatch.setattr(editing, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'}]))
     gate = [[sys.executable, '-c', 'raise SystemExit(1)']]
-    assert tasks.edit(['m.py'], 'x', gate).startswith('ESCALATE')
+    assert editing.edit(['m.py'], 'x', gate).startswith('ESCALATE')
     assert (project / 'm.py').read_text() == 'def f():\n    return 1\n'
     assert not list(project.glob('*.readscout-tmp'))
 
 
 def test_edit_gate_modifying_a_file_is_not_clobbered(project, monkeypatch):
-    monkeypatch.setattr(tasks, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'}]))
+    monkeypatch.setattr(editing, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'}]))
     code = "open('m.py','w').write('mine')\nraise SystemExit(1)"
-    out = tasks.edit(['m.py'], 'x', [[sys.executable, '-c', code]])
+    out = editing.edit(['m.py'], 'x', [[sys.executable, '-c', code]])
     assert out.startswith('ESCALATE') and (project / 'm.py').read_text() == 'mine'
 
 
 def test_edit_write_error_undoes_everything(project, monkeypatch):
     (project / 'n.py').write_text('y = 1\n')
-    monkeypatch.setattr(tasks, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'},
+    monkeypatch.setattr(editing, 'chat', reply_with([{'path': 'm.py', 'search': 'return 1', 'replace': 'return 2'},
                                                    {'path': 'n.py', 'search': 'y = 1', 'replace': 'y = 2'}]))
-    real = tasks._write_atomic
+    real = editing._write_atomic
     calls = []
 
     def flaky(path, data):
@@ -130,25 +132,25 @@ def test_edit_write_error_undoes_everything(project, monkeypatch):
         if path.name == 'n.py' and len(calls) == 2:
             raise PermissionError('denied')
         return real(path, data)
-    monkeypatch.setattr(tasks, '_write_atomic', flaky)
-    out = tasks.edit(['m.py', 'n.py'], 'x')
+    monkeypatch.setattr(editing, '_write_atomic', flaky)
+    out = editing.edit(['m.py', 'n.py'], 'x')
     assert out.startswith('ESCALATE') and 'could not write' in out
     assert (project / 'm.py').read_text() == 'def f():\n    return 1\n' and (project / 'n.py').read_text() == 'y = 1\n'
 
 
 def test_edit_cannot_create_sensitive_files(project, monkeypatch):
-    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model must not be called')))
+    monkeypatch.setattr(editing, 'chat', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model must not be called')))
     for name in ['.git/config', '.ENV', '.env.production', 'deploy.key']:
         with pytest.raises(AccessError):
-            tasks.edit([name], 'create it')
+            editing.edit([name], 'create it')
     assert not (project / '.git').exists()
 
 
 def test_edit_gate_shape_is_validated(project, monkeypatch):
-    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model must not be called')))
+    monkeypatch.setattr(editing, 'chat', lambda *a, **k: (_ for _ in ()).throw(AssertionError('model must not be called')))
     for bad in ['rm -rf /', [['ok'], 'x'], [[]], [['a']] * 9]:
         with pytest.raises(AccessError):
-            tasks.edit(['m.py'], 'x', bad)
+            editing.edit(['m.py'], 'x', bad)
 
 
 def test_edit_works_on_a_folder_the_agent_names(tmp_path, monkeypatch):
@@ -156,10 +158,11 @@ def test_edit_works_on_a_folder_the_agent_names(tmp_path, monkeypatch):
     other.mkdir()
     (other / 'a.py').write_text('x = 1\n')
     monkeypatch.setattr(tasks, 'record', lambda entry: None)
-    monkeypatch.setattr(tasks, 'chat', reply_with([{'path': str(other / 'a.py').replace('\\', '/'), 'search': 'x = 1', 'replace': 'x = 2'}]))
+    monkeypatch.setattr(editing, 'record', lambda entry: None)
+    monkeypatch.setattr(editing, 'chat', reply_with([{'path': str(other / 'a.py').replace('\\', '/'), 'search': 'x = 1', 'replace': 'x = 2'}]))
     gate = [[sys.executable, '-c', 'import pathlib; assert pathlib.Path("a.py").read_text().strip() == "x = 2"']]
     model = Model('m')
-    out = tasks.edit([str(other / 'a.py')], 'x', gate, model=model, roots=[tmp_path / 'proj'])
+    out = editing.edit([str(other / 'a.py')], 'x', gate, model=model, roots=[tmp_path / 'proj'])
     assert out.startswith('APPLIED') and (other / 'a.py').read_text() == 'x = 2\n'
 
 
@@ -171,3 +174,24 @@ def test_reading_a_folder_outside_the_working_directory(tmp_path):
     (other / '.env').write_text('A=1\n')
     lines = tasks.gather([str(other)], [work])
     assert [l.text for l in lines] == ['x = 1']
+
+
+def test_short_quotes_must_be_a_whole_line():
+    lines = [Line('f', 1, 'def f():'), Line('f', 2, '    return None'), Line('f', 3, '    x = None  # unset')]
+    assert locate('None', lines) is None           # a fragment that short would "verify" almost any claim
+    assert locate('return', lines) is None
+    assert locate('def f():', lines) == ('f', 1, 1)       # short, but the whole line: it proves something
+    assert locate('return None', lines) == ('f', 2, 2)    # long enough to be a fragment
+
+
+def test_empty_search_never_edits_an_existing_file():
+    assert editing._apply('a\n\nb\n', '', 'boom') is None      # the only blank line must not be replaced
+    assert editing._apply('a\n\nb\n', '\n', 'boom') is None
+    assert editing._apply('a\nb\n', '  \n', 'boom') is None
+
+
+def test_empty_search_on_an_existing_file_escalates(project, monkeypatch):
+    (project / 'm.py').write_text('def f():\n\n    return 1\n')
+    monkeypatch.setattr(editing, 'chat', reply_with([{'path': 'm.py', 'search': '', 'replace': 'boom'}]))
+    assert editing.edit(['m.py'], 'x').startswith('ESCALATE')
+    assert (project / 'm.py').read_text() == 'def f():\n\n    return 1\n'

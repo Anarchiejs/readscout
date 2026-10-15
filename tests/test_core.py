@@ -2,7 +2,7 @@ import sys
 
 import pytest
 
-from readscout import tasks
+from readscout import editing, tasks
 from readscout.backend import BackendError, Model, Reply
 from readscout.text import AccessError, Line, chunk, locate, redact, resolve
 
@@ -96,9 +96,9 @@ def test_run_ask_survives_backend_error(monkeypatch):
 
 
 def test_apply_exact_and_tolerant_and_ambiguous():
-    assert tasks._apply('a\nb\nc\n', 'b\n', 'B\n') == 'a\nB\nc\n'
-    assert tasks._apply('def f():\n    y = 2   \n    z\n', 'y = 2\nz', 'y = 3\nz') == 'def f():\n    y = 3\n    z\n'
-    assert tasks._apply('b\nb\n', 'b', 'B') is None
+    assert editing._apply('a\nb\nc\n', 'b\n', 'B\n') == 'a\nB\nc\n'
+    assert editing._apply('def f():\n    y = 2   \n    z\n', 'y = 2\nz', 'y = 3\nz') == 'def f():\n    y = 3\n    z\n'
+    assert editing._apply('b\nb\n', 'b', 'B') is None
 
 
 @pytest.fixture
@@ -107,7 +107,9 @@ def project(tmp_path, monkeypatch):
     root.mkdir()
     (root / 'm.py').write_bytes(b'def f():\r\n    return 1\r\n')
     monkeypatch.setattr(tasks, 'load_config', lambda: ({'models': {'quality': {'name': 'm'}, 'fast': {'name': 'm'}}}, [root]))
+    monkeypatch.setattr(editing, 'load_config', tasks.load_config)
     monkeypatch.setattr(tasks, 'record', lambda entry: None)
+    monkeypatch.setattr(editing, 'record', lambda entry: None)
     monkeypatch.setattr(tasks, 'ensure_ollama', lambda m: None)
     monkeypatch.setattr(tasks, 'installed_models', lambda url: {'m', 'small', 'big'})
     return root
@@ -115,9 +117,9 @@ def project(tmp_path, monkeypatch):
 
 def test_edit_applies_keeps_crlf_and_runs_gate(project, monkeypatch):
     chat, _ = fake_chat([{'edits': [{'path': 'm.py', 'search': '    return 1', 'replace': '    return 2'}], 'summary': 's'}])
-    monkeypatch.setattr(tasks, 'chat', chat)
+    monkeypatch.setattr(editing, 'chat', chat)
     gate = [[sys.executable, '-c', 'import sys; sys.path.insert(0, "."); import m; assert m.f() == 2']]
-    out = tasks.edit(['m.py'], 'return 2', gate)
+    out = editing.edit(['m.py'], 'return 2', gate)
     assert out.startswith('APPLIED') and 'gate passed' in out
     assert (project / 'm.py').read_bytes() == b'def f():\r\n    return 2\r\n'
 
@@ -125,9 +127,9 @@ def test_edit_applies_keeps_crlf_and_runs_gate(project, monkeypatch):
 def test_edit_restores_files_when_gate_keeps_failing(project, monkeypatch):
     bad = {'edits': [{'path': 'm.py', 'search': '    return 1', 'replace': '    return 3'}], 'summary': 's'}
     chat, calls = fake_chat([bad, dict(bad)])
-    monkeypatch.setattr(tasks, 'chat', chat)
+    monkeypatch.setattr(editing, 'chat', chat)
     gate = [[sys.executable, '-c', 'import sys; sys.path.insert(0, "."); import m; assert m.f() == 2']]
-    out = tasks.edit(['m.py'], 'return 2', gate)
+    out = editing.edit(['m.py'], 'return 2', gate)
     assert out.startswith('ESCALATE') and len(calls) == 2
     assert 'BROKE THE CHECKS' in calls[1]
     assert (project / 'm.py').read_bytes() == b'def f():\r\n    return 1\r\n'
@@ -136,8 +138,8 @@ def test_edit_restores_files_when_gate_keeps_failing(project, monkeypatch):
 def test_edit_refuses_paths_outside_request(project, monkeypatch):
     evil = {'edits': [{'path': '../x.py', 'search': '', 'replace': 'boom'}], 'summary': 's'}
     chat, _ = fake_chat([evil, dict(evil)])
-    monkeypatch.setattr(tasks, 'chat', chat)
-    assert tasks.edit(['m.py'], 'x', None).startswith('ESCALATE')
+    monkeypatch.setattr(editing, 'chat', chat)
+    assert editing.edit(['m.py'], 'x', None).startswith('ESCALATE')
     assert not (project.parent / 'x.py').exists()
 
 
@@ -165,6 +167,7 @@ def test_ask_escalates_to_quality_when_fast_finds_nothing(project, monkeypatch):
         return Reply({'findings': found}, 1, 1, 0.1)
     monkeypatch.setattr(tasks, 'chat', chat)
     monkeypatch.setattr(tasks, 'load_config', lambda: ({'models': {'fast': {'name': 'small'}, 'quality': {'name': 'big'}}}, [project]))
+    monkeypatch.setattr(editing, 'load_config', tasks.load_config)
     monkeypatch.setattr(tasks, 'ensure_ollama', lambda m: None)
     monkeypatch.setattr(tasks, 'installed_models', lambda url: {'m', 'small', 'big'})
     out = tasks.ask(['a.py'], 'what does f return?')

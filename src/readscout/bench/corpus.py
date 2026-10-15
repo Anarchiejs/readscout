@@ -86,7 +86,9 @@ def _safe_extract(data: bytes, dest: Path):
                 target.mkdir(parents=True, exist_ok=True)
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(tar.extractfile(m).read())
+                member = tar.extractfile(m)       # never None for a regular file (checked above)
+                assert member is not None
+                target.write_bytes(member.read())
 
 
 def fetch(repo: Repo, verify=True) -> Path:

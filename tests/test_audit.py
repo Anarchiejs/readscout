@@ -6,7 +6,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from readscout import tasks, web
+from readscout import editing, tasks, web
 from readscout.backend import Model, Reply
 from readscout.text import AccessError, Line, load_lines, resolve
 
@@ -17,7 +17,9 @@ def project(tmp_path, monkeypatch):
     root.mkdir()
     (root / 'm.py').write_text('def f():\n    return 1\n')
     monkeypatch.setattr(tasks, 'load_config', lambda: ({'models': {'quality': {'name': 'big'}, 'fast': {'name': 'small'}}}, [root]))
+    monkeypatch.setattr(editing, 'load_config', tasks.load_config)
     monkeypatch.setattr(tasks, 'record', lambda entry: None)
+    monkeypatch.setattr(editing, 'record', lambda entry: None)
     monkeypatch.setattr(tasks, 'ensure_ollama', lambda url: None)
     monkeypatch.setattr(tasks, 'installed_models', lambda url: {'small', 'big'})
     return root
@@ -29,27 +31,27 @@ def never_called(*a, **k):
 
 def test_edit_refuses_files_with_secrets(project, monkeypatch):
     (project / 'cfg.py').write_text('API_KEY = "sk-abcdefghijklmnopqrstuvwxyz123456"\n')
-    monkeypatch.setattr(tasks, 'chat', never_called)
+    monkeypatch.setattr(editing, 'chat', never_called)
     with pytest.raises(AccessError, match='secret'):
-        tasks.edit(['cfg.py'], 'rename the constant')
+        editing.edit(['cfg.py'], 'rename the constant')
 
 
 def test_edit_refuses_oversized_and_non_utf8(project, monkeypatch):
-    monkeypatch.setattr(tasks, 'chat', never_called)
+    monkeypatch.setattr(editing, 'chat', never_called)
     (project / 'big.py').write_text('x = 1\n' * 20_000)
     with pytest.raises(AccessError, match='too large'):
-        tasks.edit(['big.py'], 'x')
+        editing.edit(['big.py'], 'x')
     (project / 'latin.py').write_bytes('s = "caf\xe9"\n'.encode('latin-1'))
     with pytest.raises(AccessError, match='UTF-8'):
-        tasks.edit(['latin.py'], 'x')
+        editing.edit(['latin.py'], 'x')
 
 
 def test_edit_accepts_dot_prefixed_paths(project, monkeypatch):
     (project / '.github').mkdir()
     (project / '.github' / 'ci.yml').write_text('name: ci\n')
     reply = {'edits': [{'path': './.github/ci.yml', 'search': 'name: ci', 'replace': 'name: tests'}], 'summary': 's'}
-    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: Reply(reply, 1, 1, 0.1))
-    assert tasks.edit(['.github/ci.yml'], 'rename the workflow').startswith('APPLIED')
+    monkeypatch.setattr(editing, 'chat', lambda *a, **k: Reply(reply, 1, 1, 0.1))
+    assert editing.edit(['.github/ci.yml'], 'rename the workflow').startswith('APPLIED')
     assert (project / '.github' / 'ci.yml').read_text() == 'name: tests\n'
 
 

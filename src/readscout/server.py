@@ -2,13 +2,14 @@
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
-from . import paths, tasks
+from . import editing, paths, tasks
 from .backend import BackendError
 from .text import AccessError
 
 mcp = FastMCP('readscout')
-READ = {'readOnlyHint': True, 'destructiveHint': False, 'idempotentHint': True, 'openWorldHint': False}
+READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
 
 def _safe(fn, *a, **k):
@@ -42,7 +43,7 @@ def local_digest(path: str, focus: str = '') -> str:
 
 
 # destructiveHint is True on purpose: the files are overwritten and the gate commands run on the user's machine with their rights.
-@mcp.tool(annotations={'readOnlyHint': False, 'destructiveHint': True, 'idempotentHint': False, 'openWorldHint': False})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
 def local_edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None) -> str:
     """Apply a small, fully specified mechanical change with a local model (docstrings, comments, type hints,
     renames, boilerplate, test scaffolding, applying a decided pattern). Pass paths, not contents: do not
@@ -50,7 +51,7 @@ def local_edit(paths: list[str], instruction: str, gate: list[list[str]] | None 
     the project's own tests or linters) that must pass, e.g. [["python","-m","pytest","-q"]];
     if they fail after one retry the files are restored and the result is ESCALATE. Returns APPLIED with
     the diff to review, or ESCALATE. Never for design, debugging or security-sensitive code."""
-    return _safe(tasks.edit, paths, instruction, gate)
+    return _safe(editing.edit, paths, instruction, gate)
 
 
 def main():

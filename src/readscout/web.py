@@ -76,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = 'readscout'
 
     def _local(self) -> bool:
-        port = self.server.server_address[1]
+        port = self.server.server_address[1]   # type: ignore[index]  # always (host, port) for an IPv4 server
         if self.headers.get('Host') not in (f'127.0.0.1:{port}', f'localhost:{port}'):
             return False
         origin = self.headers.get('Origin')

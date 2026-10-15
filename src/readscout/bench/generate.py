@@ -54,7 +54,7 @@ def hackathon(root: Path) -> list[Task]:
                       'Which POST routes in app.js are registered WITHOUT passportConfig.isAuthenticated? One finding per route.',
                       pos, neg))
 
-    env = {}
+    env: dict[str, dict] = {}
     for f in sorted((root / 'controllers').glob('*.js')):
         for i, l in enumerate(_lines(f), 1):
             for name in re.findall(r'process\.env\.([A-Z][A-Z0-9_]+)', l):
@@ -77,7 +77,7 @@ def hackathon(root: Path) -> list[Task]:
                                 if not re.match(r'^\s*\*\s*(GET|POST|PUT|PATCH|DELETE)\s', x) and not x.strip().startswith('* @'))
                 if len(desc) >= 25:
                     blocks.append((i + 1, end + 2, desc))
-        counts = {}
+        counts: dict[str, int] = {}
         for b in blocks:
             counts[b[2]] = counts.get(b[2], 0) + 1
         unique = [b for b in blocks if counts[b[2]] == 1]

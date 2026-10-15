@@ -1,7 +1,7 @@
 """The command line, with Ollama, the hardware probe and the agents stubbed out."""
 import pytest
 
-from readscout import agents, backend, cli, hardware, paths, tasks
+from readscout import agents, backend, cli, editing, hardware, paths, tasks
 from readscout.hardware import Hardware
 
 REC = {'fast': {'model': 'small', 'download_gb': 3, 'why': 'fits', 'ctx': 32768},
@@ -91,7 +91,7 @@ def test_task_commands_call_the_tools(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(tasks, 'ask', lambda *a: calls.append(('ask', a)) or 'ASK')
     monkeypatch.setattr(tasks, 'digest', lambda *a: calls.append(('digest', a)) or 'DIGEST')
-    monkeypatch.setattr(tasks, 'edit', lambda *a: calls.append(('edit', a)) or 'EDIT')
+    monkeypatch.setattr(editing, 'edit', lambda *a: calls.append(('edit', a)) or 'EDIT')
     cli.main(['ask', 'src', 'lib', '-q', 'where?', '--summary', '--quality'])
     cli.main(['digest', 'build.log', '-f', 'tests'])
     cli.main(['edit', 'a.py', '-i', 'add types', '--gate', 'python -m pytest -q', '--gate', 'ruff check'])

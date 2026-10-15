@@ -4,7 +4,7 @@ import os
 import platform
 import time
 
-from .. import __version__, backend, hardware, paths, tasks
+from .. import __version__, backend, editing, hardware, paths, tasks
 from ..text import load_lines
 from . import edits, generate
 
@@ -107,7 +107,7 @@ def run(models: list[str], families: list[str] | None = None, do_edits=True, pro
         read_rows += run_reading(model, task_list, progress)
         if do_edits:
             progress(f'Edit tasks with {name} ({len(edits.TASKS)} tasks)')
-            for r in edits.run(model, tasks.edit):
+            for r in edits.run(model, editing.edit):
                 edit_rows.append({'model': name, **r})
                 progress(f"  {name:16} edit:{r['task']:38} {r['status']:9} {r['score']:.2f}  {r['seconds']:5.1f}s")
     hw = hardware.detect()

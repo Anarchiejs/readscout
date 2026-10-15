@@ -179,7 +179,7 @@ def ensure_ollama(url='http://127.0.0.1:11434', wait=60) -> None:
             raise BackendError(f'Ollama is not installed. Install it from https://ollama.com, then run `{cli()} setup`.')
         cmd = [binary, 'serve']
     env = {**os.environ, **{k: os.environ.get(k, v) for k, v in OLLAMA_ENV.items()}}
-    spawn = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+    spawn: dict = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
                  start_new_session=sys.platform != 'win32', close_fds=True)
     explorer = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'explorer.exe')
     if sys.platform == 'win32' and cmd[0].endswith('ollama app.exe') and os.path.exists(explorer):

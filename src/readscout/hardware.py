@@ -48,14 +48,16 @@ def ram_gb() -> float:
         return int(out.strip() or 0) / 2**30
     try:
         with open('/proc/meminfo') as f:
-            kb = int(re.search(r'MemTotal:\s+(\d+)', f.read())[1])
-        return kb / 2**20
-    except (OSError, TypeError):
+            m = re.search(r'MemTotal:\s+(\d+)', f.read())
+    except OSError:
         return 0.0
+    return int(m[1]) / 2**20 if m else 0.0
 
 
 def _windows_registry_vram() -> tuple[float, str]:
     """Works for AMD/Intel too, unlike WMI AdapterRAM which caps at 4 GB."""
+    if sys.platform != 'win32':
+        return 0.0, ''
     import winreg
     best, name = 0.0, ''
     base = r'SYSTEM\ControlSet001\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'

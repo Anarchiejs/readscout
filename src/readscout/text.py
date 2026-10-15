@@ -47,7 +47,7 @@ class Line:
 
 def outside(real: Path, allowed: list[Path] | None) -> bool:
     """True when an allow-list is set (`readscout folders add`) and the resolved path is in none of its folders."""
-    return bool(allowed) and not any(real.is_relative_to(a) for a in allowed)
+    return bool(allowed) and not any(real.is_relative_to(a) for a in allowed or [])
 
 
 def resolve(path: str, roots: list[Path], allowed: list[Path] | None = None) -> tuple[Path, str]:
@@ -123,7 +123,9 @@ def render(lines: list[Line]) -> str:
 
 def chunk(lines: list[Line], max_chars: int) -> list[list[Line]]:
     """Split on line boundaries so that each rendered chunk stays under max_chars."""
-    chunks, cur, size, current = [], [], 0, None
+    chunks: list[list[Line]] = []
+    cur: list[Line] = []
+    size, current = 0, None
     for ln in lines:
         cost = len(ln.text) + len(str(ln.no)) + 3
         if ln.path != current or not cur:       # render() adds a "===== FILE x =====" header on every file change
@@ -141,6 +143,9 @@ def chunk(lines: list[Line], max_chars: int) -> list[list[Line]]:
 
 
 _NUM_PREFIX = re.compile(r'^\s*\d+\|\s?')
+# Below this length a quote is accepted only when it is a whole line: `None` or `return` appear everywhere, so a
+# fragment that short would "verify" almost any claim.
+MIN_QUOTE_CHARS = 10
 
 
 def _norm(s: str) -> str:
@@ -167,6 +172,8 @@ def locate_all(quote: str, lines: list[Line]) -> list[tuple[str, int, int]]:
     q = _norm('\n'.join(parts))
     if len(q) < 4:
         return []
+    if len(q) < MIN_QUOTE_CHARS:
+        return [(ln.path, ln.no, ln.no) for ln in lines if q == _norm(ln.text)]
     single = [(ln.path, ln.no, ln.no) for ln in lines if q in _norm(ln.text)]
     if single:
         return single

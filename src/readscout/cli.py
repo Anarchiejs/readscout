@@ -24,7 +24,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import __version__, agents, backend, hardware, paths, stats, tasks
+from . import __version__, agents, backend, editing, hardware, paths, stats, tasks
 
 
 def doctor() -> int:
@@ -222,7 +222,7 @@ def main(argv=None):
         print(tasks.digest(a.path, a.focus))
     elif a.cmd == 'edit':
         gate = [[t.strip('"') for t in shlex.split(g, posix=sys.platform != 'win32')] for g in a.gate] if a.gate else None
-        print(tasks.edit(a.paths, a.instruction, gate))
+        print(editing.edit(a.paths, a.instruction, gate))
     elif a.cmd == 'folders':
         return folders(a.action, a.folders)
     elif a.cmd == 'gate':

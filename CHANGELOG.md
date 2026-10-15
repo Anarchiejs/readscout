@@ -14,6 +14,12 @@
   behaviour change. The setup server no longer relies on `assert` to validate request bodies (`python -O` drops them).
 - The French README no longer mentions the project-folder list removed in 0.1.3.
 - Tests for the command line, the Ollama client and the benchmark logs: coverage from 62 % to 76 %; CI now requires 72 %.
+- **Fix: short quotes no longer verify a claim.** A quote under 10 characters (`None`, `return`) was accepted wherever it
+  appeared in a line, so it "proved" almost anything; it is now accepted only when it is a whole line.
+- **Fix:** an empty `search` block from the model is refused on an existing file. On a file with exactly one blank line
+  it used to replace that line.
+- `local_edit` moved to its own module, `editing.py`; `tasks.py` keeps the reading tools. Tests for the MCP tools.
+- CI type-checks the package with mypy (Windows, macOS and Linux).
 
 ## 0.1.5
 
