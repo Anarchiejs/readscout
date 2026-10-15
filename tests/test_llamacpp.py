@@ -1,6 +1,8 @@
 """The llama.cpp engine with a fake llama-server: chat format, one shared server, idle stop, configuration."""
 import io
 import json
+import subprocess
+import types
 
 import pytest
 
@@ -31,6 +33,22 @@ class FakeServer:
             return io.BytesIO(json.dumps([{'is_processing': self.busy}]).encode())
         self.bodies.append((port, path, body))
         return io.BytesIO(json.dumps(self.reply).encode())
+
+
+def fake_subprocess(monkeypatch, **overrides):
+    """llamacpp's own view of the subprocess module with some functions replaced: a patch of the real module would also
+    reach everything else that runs commands (the hardware detection runs `sysctl` on macOS)."""
+    fake = types.SimpleNamespace(**{k: getattr(subprocess, k) for k in dir(subprocess) if not k.startswith('__')})
+    for name, fn in overrides.items():
+        setattr(fake, name, fn)
+    monkeypatch.setattr(llamacpp, 'subprocess', fake)
+
+
+@pytest.fixture(autouse=True)
+def default_models(monkeypatch):
+    """The command line writes a first config that follows the machine (gemma4:e2b without a GPU, as on CI): these tests
+    expect the default models, whatever the machine they run on."""
+    monkeypatch.setattr(hardware, 'ensure_config', lambda: None)
 
 
 @pytest.fixture
@@ -288,7 +306,7 @@ def test_engine_reuses_the_gguf_ollama_already_downloaded(monkeypatch, tmp_path)
         returncode, stderr = 0, ''
         stdout = f'# Modelfile\nFROM {projector}\nFROM {weights}\nTEMPLATE x\n'
     monkeypatch.setattr(backend, 'ollama_binary', lambda: 'ollama')
-    monkeypatch.setattr(llamacpp.subprocess, 'run', lambda *a, **k: Done())
+    fake_subprocess(monkeypatch, run=lambda *a, **k: Done())
     assert cli.main(['engine', 'llamacpp', '--fast', 'ollama:gemma4:e4b']) == 0
     spec = paths.load_config()['llamacpp']['models']['fast']
     assert spec['gguf'] == str(weights) and spec['name'] == 'gemma4:e4b'
@@ -314,7 +332,7 @@ def fake_devices(monkeypatch, out=LIST_DEVICES):
     class Done:
         stdout = out
     monkeypatch.setattr(llamacpp, 'binary', lambda cfg: 'llama-server')
-    monkeypatch.setattr(llamacpp.subprocess, 'run', lambda *a, **k: Done())
+    fake_subprocess(monkeypatch, run=lambda *a, **k: Done())
 
 
 def test_devices_are_read_from_llama_server(monkeypatch):
@@ -369,7 +387,7 @@ def test_llama_server_gets_a_secret_key_and_readscout_uses_it(monkeypatch, tmp_p
     def popen(cmd, **kw):
         seen['cmd'], seen['env'] = cmd, kw.get('env')
         return Proc()
-    monkeypatch.setattr(llamacpp.subprocess, 'Popen', popen)
+    fake_subprocess(monkeypatch, Popen=popen)
     monkeypatch.setattr(llamacpp, 'binary', lambda cfg: 'llama-server')
     monkeypatch.setattr(llamacpp.atexit, 'register', lambda fn: None)
     cfg = configure(tmp_path, fast='small')
