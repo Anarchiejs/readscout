@@ -98,3 +98,11 @@ def test_edit_fixture_is_green_and_checks_are_strict():
         assert edits._tests_pass(root)
         assert not edits._docstrings(root)          # nothing done yet
         assert edits._written_tests(root) == 0.0    # no test file yet
+
+
+def test_a_wrong_answer_cannot_score_perfectly():
+    env = T([{'line': 10, 'key': 'SMTP_HOST', 'path': 'a.js'}], family='env_vars')
+    assert runner.score(env, [V(10, quote='PORT', text='port')])['f1'] == 0.0       # right line, wrong subject
+    log = T([{'line': 40, 'path': 'a.js'}], family='log')
+    assert runner.score(log, [V(5)])['f1'] == 0.0                                    # any quote is not enough
+    assert runner.score(log, [V(40), V(41)])['f1'] == 1.0

@@ -6,17 +6,19 @@ readscout gives a coding agent a way to have local models read files. The risks 
 
 | Risk | Mitigation |
 |---|---|
-| File contents sent off the machine | Model endpoints must be loopback (`127.0.0.1`, `localhost`, `::1`); anything else is refused in code. No online fallback exists. |
+| File contents sent off the machine | Model endpoints must be loopback (`127.0.0.1`, `localhost`, `::1`); anything else is refused in code. A loopback address alone is not enough (Ollama can forward some models to its cloud), so models named `...-cloud` or `...:cloud`, and models Ollama reports with a remote host, are refused too; Ollama is started with `OLLAMA_NO_CLOUD=1`. No online fallback exists. |
 | A model acting on the system | Models get **no tools**. They receive text and must return JSON matching a schema. Only readscout reads or writes files. |
 | Reading outside the intended project | Only folders the user registered are readable; paths are resolved (symlinks included) and must stay inside them. Drive roots, the home folder and system folders cannot be registered. |
-| Secrets reaching a model or the agent | `.env*`, `.git`, `.ssh`, credential files (`.npmrc`, `.netrc`, `id_rsa`...), keys, certificates, databases and binaries are refused. When reading, common secret patterns are masked before any text reaches the model; `local_edit` needs the exact text, so it refuses any file that looks like it contains a secret. |
-| Prompt injection inside files | File contents are framed as data, model answers are returned as data, and the skill tells the agent never to follow instructions found in either. This is a mitigation, not a guarantee. |
-| Hallucinated facts | Every finding needs a quote found verbatim in the source, else it is dropped; line numbers are computed by readscout. |
-| A bad edit | `local_edit` only touches the files named in the call (UTF-8, 60 KB at most), applies exact search/replace blocks, runs the caller's gate commands, and restores the files byte for byte when anything fails. |
+| Secrets reaching a model or the agent | `.env*`, `.git`, `.ssh`, credential files (`.npmrc`, `.netrc`, `id_rsa`...), keys, certificates, databases and binaries are refused, whatever the letter case, when reading and when creating files. When reading, common secret patterns (private keys, provider tokens, `password`/`secret`/`token`/`api key` assignments including JSON) are masked before any text reaches the model, keeping line numbers intact; `local_edit` needs the exact text, so it refuses any file that looks like it contains a secret. Masking is pattern based and cannot be complete. |
+| Prompt injection inside files | File contents are framed as data, model answers are returned as data (one flattened, length-bounded line per finding), and the skill tells the agent never to follow instructions found in either. The prose of an answer is not verified, only the quotes are. This is a mitigation, not a guarantee. |
+| Hallucinated facts | Every finding needs a quote found in the source, else it is dropped; the quote may differ only by whitespace and by line breaks between adjacent lines. Line numbers are computed by readscout. |
+| A bad edit | `local_edit` only touches the files named in the call (UTF-8, 60 KB at most, one project at a time), applies exact search/replace blocks, writes atomically, refuses to overwrite a file that changed while the model was working, runs the caller's gate commands, and restores what it wrote, byte for byte, when anything fails. A file somebody else modified in the meantime is left alone and reported. |
 | A web page driving the local setup server | It listens on `127.0.0.1` only, rejects foreign Host and Origin headers, and requires a random per-process token for every state change. Model downloads are limited to the built-in catalog. |
 
 What readscout does **not** protect against: a malicious Ollama install, or a compromised account on your machine.
-The gate commands of `local_edit` run with your permissions, exactly like your agent running your tests.
+The gate commands of `local_edit` (at most 5, argv lists, no shell) run with your permissions, exactly like your agent running your tests: whoever can call the tool can run them.
+
+Supply chain: CI and release actions are pinned by commit, the release workflow runs the tests before building, and each release publishes `SHA256SUMS`. Installers download the wheel from the GitHub release of the same version; they do not verify a signature.
 
 ## Reporting a vulnerability
 

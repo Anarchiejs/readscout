@@ -3,9 +3,11 @@
 Windows: %APPDATA%\\readscout   macOS: ~/Library/Application Support/readscout   Linux: $XDG_CONFIG_HOME/readscout
 Override everything with READSCOUT_HOME (used by the tests).
 """
+import contextlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parent
@@ -59,6 +61,40 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     p = config_file()
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     tmp.replace(p)
+
+
+@contextlib.contextmanager
+def config_lock(timeout=10.0, stale=30.0):
+    """Serialize read-modify-write cycles of the config between processes (MCP servers, the web page, the CLI)."""
+    lock = home() / 'config.lock'
+    deadline = time.time() + timeout
+    while True:
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > stale:     # left behind by a crashed process
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise TimeoutError('readscout config is locked by another process')
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def update_config(mutate) -> dict:
+    """Load the config, let `mutate(cfg)` change it, save it: nobody else's change in between is lost."""
+    with config_lock():
+        cfg = load_config()
+        mutate(cfg)
+        save_config(cfg)
+        return cfg

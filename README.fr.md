@@ -75,7 +75,7 @@ Le plugin apporte le skill et le serveur MCP (lancé par `uvx`, rien d'autre à 
 pour télécharger les modèles et autoriser un dossier :
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl readscout setup
 ```
 
 C'est la même page que pour l'option A : installe les modèles et ajoute tes dossiers (la partie « Agents » est déjà
@@ -87,7 +87,7 @@ faite par le plugin). Redémarre Claude Code.
 # 1. Ollama : https://ollama.com/download (vérifie qu'il tourne)
 # 2. uv :     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl
 # 4. modèles conseillés pour ta machine
 readscout pull
 # 5. connecter tes agents
@@ -138,9 +138,14 @@ de tests), toujours contrôlés par tes tests. Il garde pour lui ce qu'un `grep`
 
 ## Sécurité, limites, désinstallation
 
-- Les modèles tournent uniquement sur `127.0.0.1`, jamais de modèle en ligne. Le modèle n'a aucun outil ; seul
-  readscout lit les fichiers, et seulement dans les dossiers autorisés. `.env`, clés, fichiers d'identifiants, `.git` et
-  binaires sont refusés ; les secrets sont masqués, et `local_edit` refuse les fichiers qui en contiennent.
+- Les modèles tournent uniquement sur `127.0.0.1` ; les modèles cloud d'Ollama sont refusés (par leur nom et quand Ollama
+  les signale comme servis à distance), jamais de modèle en ligne. Le modèle n'a aucun outil ; seul
+  readscout lit les fichiers, et seulement dans les dossiers autorisés. `.env*`, `.git`, clés, fichiers d'identifiants et
+  binaires sont refusés (majuscules comprises) ; les secrets courants sont masqués (par motifs : aucun masque n'est
+  parfait, garde les vrais identifiants hors des dossiers autorisés), et `local_edit` refuse les fichiers qui en
+  contiennent. `local_edit` écrit de façon atomique, n'écrase jamais un fichier modifié pendant l'attente du modèle, et
+  ne restaure que ce qu'il a écrit ; ses commandes `gate` s'exécutent avec tes droits, choisies par l'agent.
+  Sont stockés en local : `config.json` et `metrics.jsonl` (outil, modèle, tailles, durées ; jamais de contenu).
   Détails : [SECURITY.md](SECURITY.md).
 - Une citation vérifiée prouve que la ligne existe, pas que le modèle l'a bien comprise. Ne délègue ni revue de code,
   ni recherche de bugs, ni vérification de faits.

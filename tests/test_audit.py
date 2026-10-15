@@ -124,8 +124,9 @@ def test_models_free_memory_by_themselves(monkeypatch):
         return Resp(b'{}')
     monkeypatch.setattr(backend, '_request', fake_request)
     monkeypatch.setattr(backend, 'USED', set())
+    monkeypatch.setattr(backend, 'CHECKED', set())
     backend.chat(Model('gemma4:e4b'), 's', 'u', {'type': 'object'})
-    assert sent[0][1]['keep_alive'] == backend.UNLOAD_AFTER == '60s'
+    assert next(b for u, b in sent if u.endswith('/api/chat'))['keep_alive'] == backend.UNLOAD_AFTER == '60s'
     backend.unload_used()
     assert sent[-1] == ('http://127.0.0.1:11434/api/generate', {'model': 'gemma4:e4b', 'keep_alive': 0})
     assert backend.unload_all() == ['gemma4:26b']

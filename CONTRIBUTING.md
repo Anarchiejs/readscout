@@ -16,8 +16,10 @@ pytest -q
 
 The tests use a fake model and need neither Ollama nor a GPU. CI runs them on Windows, macOS and Linux.
 
-Before a release, run the end-to-end check on a machine with Ollama and a GPU: it installs readscout, pulls the
-recommended models and exercises every tool, the MCP server, the setup page and the benchmark.
+Before a release, run the end-to-end check on a machine with Ollama and a GPU (it is not part of CI): it installs
+readscout in its own temporary folders (your installation and your config are left alone), pulls the recommended models
+and exercises every tool, the MCP server, the setup page and the benchmark. Both scripts exit with a non-zero code when a
+step fails. The Release workflow runs the unit tests on Windows, macOS and Linux and `scripts/check_version.py` first.
 
 ```sh
 bash scripts/e2e.sh                                          # Linux / macOS
@@ -26,9 +28,10 @@ powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1     # Windows
 
 Testing the Claude Code plugin from a local checkout: `claude plugin validate . --strict`, and run its MCP command
 with `uvx --no-cache --from . readscout-mcp` (uv caches local builds, so without `--no-cache` you may get stale code).
-Release: bump the version in `src/readscout/__init__.py`, the wheel URLs (README, installers, `.claude-plugin/plugin.json`)
-and `CHANGELOG.md`, write `.github/release-notes/vX.Y.Z.md`, then push the tag `vX.Y.Z`: the Release workflow builds the
-package and publishes the release with those notes.
+Release: bump the version in `src/readscout/__init__.py`, the wheel URLs (README, `install.sh`, `install.ps1`,
+`.claude-plugin/plugin.json`) and `CHANGELOG.md`, write `.github/release-notes/vX.Y.Z.md`, run
+`python scripts/check_version.py`, then push the tag `vX.Y.Z`: the Release workflow tests, builds the package and
+publishes the release with those notes and `SHA256SUMS`.
 
 ## Rules of the house
 

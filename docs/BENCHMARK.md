@@ -4,6 +4,10 @@ Run it yourself: `readscout bench` (or `readscout bench --models gemma4:e4b,gemm
 into a [GitHub issue](https://github.com/Anarchiejs/readscout/issues/new?title=bench) and saves the full results as JSON.
 Reports from other GPUs are how the model catalog improves.
 
+> Scoring note: from the release after 0.1.1, a finding about the wrong subject on the right line no longer counts and a
+> log task needs the root cause. The scores below were measured with the earlier, more lenient rule and have not been
+> re-measured yet, so treat them as upper bounds.
+
 ## Public corpus v1
 
 Four MIT-licensed repositories, downloaded from GitHub at pinned commits and checked against a content fingerprint

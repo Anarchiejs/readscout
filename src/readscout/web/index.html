@@ -39,15 +39,15 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;
   <h2>2. Your machine</h2>
   <div class="card">
     <div id="hw" class="mut">Detecting...</div>
-    <label class="s">GPU memory (VRAM): <b id="vv"></b> GB<input type="range" id="vram" min="6" max="24" step="1"></label>
-    <label class="s">System memory (RAM): <b id="rv"></b> GB<input type="range" id="ram" min="16" max="64" step="1"></label>
+    <label class="s">GPU memory (VRAM): <b id="vv"></b> GB<input type="range" id="vram" min="0" max="24" step="1"></label>
+    <label class="s">System memory (RAM): <b id="rv"></b> GB<input type="range" id="ram" min="4" max="64" step="1"></label>
     <div class="mut" style="font-size:13px">Detected values are pre-filled; change them if they look wrong (for example a laptop with shared memory).</div>
   </div>
 
   <h2>3. Models for this machine</h2>
   <div class="grid" id="models"></div>
   <div class="row" style="margin-top:8px"><button class="b" id="useBtn" onclick="useModels()">Use these models</button><span class="mut" id="cur"></span></div>
-  <div class="card" id="envcard" style="display:none"><div class="row"><div style="flex:1">Recommended Ollama settings (flash attention, 8-bit KV cache, one model at a time) let the bigger models fit next to a small GPU.</div><button class="g" onclick="post('/api/ollama-env',{}).then(r=>toast(r.message))">Apply</button></div></div>
+  <div class="card" id="envcard" style="display:none"><div class="row"><div style="flex:1">Recommended Ollama settings (flash attention, 8-bit KV cache, one model at a time, Ollama cloud features off) let the bigger models fit next to a small GPU. They are saved as permanent user environment variables and also apply to your other uses of Ollama.</div><button class="g" onclick="applyEnv()">Apply</button></div></div>
 
   <h2>4. Coding agents</h2><div class="grid" id="agents"></div>
 
@@ -71,12 +71,15 @@ const TOKEN='__TOKEN__';let S=null,timer=null,dirty=false;
 const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n).toLocaleString();
 function toast(t){const m=$('msg');m.textContent=t;m.style.display='block';clearTimeout(m._t);m._t=setTimeout(()=>m.style.display='none',6000)}
-async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Readscout-Token':TOKEN},body:JSON.stringify(b)});return r.json()}
+async function post(u,b){try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Readscout-Token':TOKEN},body:JSON.stringify(b)});const j=await r.json().catch(()=>({}));if(!r.ok)return{message:'Error: '+(j.error||r.status)};return j}catch(e){return{message:'Error: the local readscout server did not answer.'}}}
+function applyEnv(){if(confirm('Save these Ollama settings as permanent user environment variables? They also apply to your other uses of Ollama.'))post('/api/ollama-env',{}).then(r=>toast(r.message))}
 function show(v){for(const x of ['setup','usage']){$(x).style.display=x===v?'':'none';$('t-'+x).classList.toggle('on',x===v)}history.replaceState(null,'',v==='setup'?'/setup':'/')}
 async function load(){
   const q=dirty?`?vram=${$('vram').value}&ram=${$('ram').value}`:'';
-  S=await (await fetch('/api/state'+q)).json();render();
-  const busy=Object.values(S.pulls).some(p=>!p.done);clearTimeout(timer);timer=setTimeout(load,busy?1000:8000);
+  clearTimeout(timer);let busy=false;
+  try{const r=await fetch('/api/state'+q);const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);S=j;render();busy=Object.values(S.pulls).some(p=>!p.done)}
+  catch(e){toast('Cannot read the state: '+(e.message||e))}
+  timer=setTimeout(load,busy?1000:8000);
 }
 function render(){
   $('ver').textContent='v'+S.version;

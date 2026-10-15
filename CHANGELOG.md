@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.2
+
+Fixes from a full audit of the code, the skill and the release process.
+
+- **Files and secrets.** Exclusions (`.env*`, `.git`, credentials...) ignore the letter case and also apply to files
+  `local_edit` creates; secrets in JSON and in prefixed names (`client_secret`, `DB_PASSWORD`...) are masked; masking a
+  multi-line key no longer shifts the line numbers below it; a folder containing a credentials file is read instead of
+  failing, and excluded folders such as `node_modules` are not walked.
+- **Quotes.** Only whitespace and line breaks between adjacent lines may differ from the source; text from distant lines
+  of a filtered log can no longer be glued into a quote. Two projects with the same relative path are told apart.
+- **local_edit.** Atomic writes, nothing is written when the file changed while the model was working, a failed gate or
+  a write error restores only what was written, one project per call, gate shape validated.
+- **Local only.** Ollama cloud models are refused (by name and by remote host) and Ollama is started with
+  `OLLAMA_NO_CLOUD=1`. `readscout stop` says when a model could not be unloaded.
+- **Reading.** The context budget counts the prompt, the question and the merge of summaries; long lines that were cut
+  are reported; model prose in receipts is flattened to one bounded line.
+- **Setup.** Small machines (no GPU, 8 GB RAM) get a matching recommendation; unknown web actions are rejected instead of
+  uninstalling; errors reach the page; config writes are locked and atomic; the Codex install validates the TOML, handles
+  sub-tables and CRLF and keeps a backup.
+- **Benchmark.** A finding about the wrong subject on the right line no longer counts, and a log task needs the root
+  cause. Scores published before this change used the lenient rule and are to be re-measured.
+- **Release.** Tests and a version check run before a release is built; `SHA256SUMS` is published; actions are pinned;
+  permissions are per job; the e2e scripts are isolated and return a real exit code; `install.sh` installs nothing
+  without a terminal to ask; `mcp>=1.23`.
+
 ## 0.1.1
 
 - **Models free the memory by themselves.** Ollama now unloads a model one minute after the last call (it kept it

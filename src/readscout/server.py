@@ -44,11 +44,13 @@ def local_digest(path: str, focus: str = '') -> str:
     return _safe(tasks.digest, path, focus)
 
 
-@mcp.tool(annotations={'readOnlyHint': False, 'destructiveHint': False, 'idempotentHint': False, 'openWorldHint': False})
+# destructiveHint is True on purpose: the files are overwritten and the gate commands run on the user's machine with their rights.
+@mcp.tool(annotations={'readOnlyHint': False, 'destructiveHint': True, 'idempotentHint': False, 'openWorldHint': False})
 def local_edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None) -> str:
     """Apply a small, fully specified mechanical change with a local model (docstrings, comments, type hints,
     renames, boilerplate, test scaffolding, applying a decided pattern). Pass paths, not contents: do not
-    Read the files first. gate = commands (argv lists) that must pass, e.g. [["python","-m","pytest","-q"]];
+    Read the files first. gate = commands (argv lists, at most 5, no shell, run with the user's rights: only
+    the project's own tests or linters) that must pass, e.g. [["python","-m","pytest","-q"]];
     if they fail after one retry the files are restored and the result is ESCALATE. Returns APPLIED with
     the diff to review, or ESCALATE. Never for design, debugging or security-sensitive code."""
     return _safe(tasks.edit, paths, instruction, gate)

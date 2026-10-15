@@ -4,6 +4,7 @@ Every state-changing request needs the per-process token embedded in the page, a
 headers must be local, so a web site open in the browser cannot drive this server.
 """
 import json
+import re
 import secrets
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from . import __version__, agents, backend, hardware, paths, stats
 TOKEN = secrets.token_urlsafe(24)
 PULLS: dict[str, dict] = {}
 PAGE = (paths.PACKAGE / 'web' / 'index.html')
+MODEL_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}')
 
 
 def _pull_worker(name, url):
@@ -48,8 +50,8 @@ def state(vram=None, ram=None) -> dict:
     cfg = paths.load_config()
     url = cfg['ollama_url']
     hw = _cached('hardware', 3600, hardware.detect)
-    v = float(vram) if vram else max(6.0, min(24.0, round(hw.vram_gb)))
-    r = float(ram) if ram else max(16.0, min(64.0, round(hw.ram_gb)))
+    v = float(vram) if vram else max(0.0, min(24.0, round(hw.vram_gb)))
+    r = float(ram) if ram else max(4.0, min(64.0, round(hw.ram_gb)))
     version = backend.health(url)
     installed = sorted(backend.installed_models(url)) if version else []
     count = len({n for n in installed if not n.endswith(':latest')})
@@ -65,7 +67,8 @@ def apply_ollama_env() -> str:
         return 'Set these variables in the environment of the Ollama service: ' + ' '.join(f'{k}={v}' for k, v in backend.OLLAMA_ENV.items())
     for k, v in backend.OLLAMA_ENV.items():
         subprocess.run(['setx', k, v], capture_output=True, stdin=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
-    return 'Saved as user environment variables. Quit Ollama from the tray icon once so it restarts with them.'
+    return ('Saved as user environment variables (' + ', '.join(backend.OLLAMA_ENV) + '). They apply to every use of Ollama on this '
+            'account. Quit Ollama from the tray icon once so it restarts with them.')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -100,8 +103,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/state':
             try:
                 return self._send(200, state(q.get('vram'), q.get('ram')))
-            except (backend.BackendError, ValueError) as e:
-                return self._send(503, {'error': str(e)})
+            except Exception as e:  # noqa: BLE001 - the page must get an answer it can show, whatever went wrong
+                return self._send(503, {'error': str(e)[:300] or type(e).__name__})
         self._send(404, {'error': 'not found'})
 
     def do_POST(self):
@@ -120,6 +123,12 @@ class Handler(BaseHTTPRequestHandler):
             assert isinstance(body, dict)
         except (ValueError, AssertionError):
             return self._send(400, {'error': 'invalid JSON body'})
+        try:
+            return self._post(body)
+        except Exception as e:  # noqa: BLE001 - always answer with JSON the page can show
+            return self._send(500, {'error': str(e)[:300] or type(e).__name__})
+
+    def _post(self, body):
         cfg = paths.load_config()
         if self.path == '/api/pull':
             name = body.get('model', '')
@@ -129,20 +138,34 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=_pull_worker, args=(name, cfg['ollama_url']), daemon=True).start()
             return self._send(200, {'ok': True})
         if self.path == '/api/models':
+            chosen = {}
             for tier in ('fast', 'quality'):
-                if isinstance(body.get(tier), str) and 0 < len(body[tier]) <= 120:
-                    cfg['models'][tier] = {'name': body[tier], 'ctx': cfg['models'].get(tier, {}).get('ctx', 32768)}
-            paths.save_config(cfg)
+                name = body.get(tier)
+                if name is None:
+                    continue
+                if not isinstance(name, str) or not MODEL_NAME.fullmatch(name) or backend.CLOUD_NAME.search(name):
+                    return self._send(400, {'error': f'invalid or cloud model name for {tier}'})
+                chosen[tier] = name
+
+            def apply(c):
+                for tier, name in chosen.items():
+                    c['models'][tier] = {'name': name, 'ctx': c['models'].get(tier, {}).get('ctx', 32768)}
+            paths.update_config(apply)
             return self._send(200, {'ok': True})
         if self.path == '/api/agent':
-            table = agents.INSTALL if body.get('action') == 'install' else agents.UNINSTALL
-            fn = table.get(body.get('agent'))
+            table = {'install': agents.INSTALL, 'uninstall': agents.UNINSTALL}.get(body.get('action'))
+            fn = table.get(body.get('agent')) if table else None
+            if fn is None:
+                return self._send(400, {'error': 'unknown action or agent'})
             _CACHE.pop('agents', None)
-            return self._send(200, {'message': fn() if fn else 'unknown agent'})
+            return self._send(200, {'message': fn()})
         if self.path == '/api/project':
             from .cli import register, unregister
+            action = body.get('action')
+            if action not in ('add', 'remove'):
+                return self._send(400, {'error': 'unknown action'})
             try:
-                msg = register(body['id'], body['path']) if body.get('action') == 'add' else unregister(body['id'])
+                msg = register(body['id'], body['path']) if action == 'add' else unregister(body['id'])
             except (SystemExit, KeyError, OSError) as e:
                 msg = str(e)
             return self._send(200, {'message': msg})

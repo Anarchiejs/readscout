@@ -32,23 +32,35 @@ FORBIDDEN = [Path.home(), Path(os.environ.get('SystemRoot', 'C:/Windows')), Path
              Path('C:/Users'), Path('/'), Path('/usr'), Path('/etc'), Path('/home'), Path('/Users'), Path('/System')]
 
 
+HOME_PRIVATE = {'.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.config', '.claude', '.codex'}   # at any depth
+HOME_APPDATA = {'AppData', 'Library'}        # the folder and its direct children (Local, Roaming, Application Support...)
+HOME_BROAD = {'Documents', 'Desktop', 'Downloads', 'OneDrive'}
+
+
+def _private_home_folder(root: Path, home: Path) -> bool:
+    if not root.is_relative_to(home):
+        return False
+    parts = root.relative_to(home).parts
+    return bool(parts) and (parts[0] in HOME_PRIVATE or (parts[0] in HOME_APPDATA and len(parts) <= 2)
+                            or (len(parts) == 1 and parts[0] in HOME_BROAD))
+
+
 def register(project_id: str, path: str) -> str:
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', project_id or ''):
         raise SystemExit('Invalid id (letters, digits, - and _ only)')
     root = Path(path).expanduser().resolve(strict=True)
-    if not root.is_dir() or root == Path(root.anchor) or any(root == f.resolve() for f in FORBIDDEN if f.exists()):
-        raise SystemExit('Expected a specific project folder, not a drive, the home folder or a system folder')
-    cfg = paths.load_config()
-    cfg['projects'][project_id] = root.as_posix()
-    paths.save_config(cfg)
+    home = Path.home().resolve()
+    if (not root.is_dir() or root == Path(root.anchor) or any(root == f.resolve() for f in FORBIDDEN if f.exists())
+            or root == home or root in home.parents or _private_home_folder(root, home)):
+        raise SystemExit('Expected a specific project folder, not a drive, the home folder, a system folder or an application data folder')
+    paths.update_config(lambda cfg: cfg['projects'].__setitem__(project_id, root.as_posix()))
     return f'Registered {project_id} -> {root}'
 
 
 def unregister(project_id: str) -> str:
-    cfg = paths.load_config()
-    if cfg['projects'].pop(project_id, None) is None:
+    if project_id not in paths.load_config()['projects']:
         raise SystemExit(f'Unknown project: {project_id}')
-    paths.save_config(cfg)
+    paths.update_config(lambda cfg: cfg['projects'].pop(project_id, None))
     return f'Removed {project_id}'
 
 
@@ -111,8 +123,7 @@ def pull(models: list[str]):
         hw = hardware.detect()
         rec = hardware.recommend(hw.vram_gb, hw.ram_gb)
         models = sorted({r['model'] for r in rec.values()})
-        cfg['models'] = {t: {'name': r['model'], 'ctx': 32768} for t, r in rec.items()}
-        paths.save_config(cfg)
+        paths.update_config(lambda c: c.__setitem__('models', {t: {'name': r['model'], 'ctx': 32768} for t, r in rec.items()}))
     for m in models:
         last = [0.0]
 
@@ -238,7 +249,11 @@ def main(argv=None):
             print('Ollama is not running: no model is in memory.')
         else:
             names = backend.unload_all(url)
-            print(f'Unloaded: {", ".join(names)}' if names else 'No model was loaded.')
+            left = backend.loaded_models(url)
+            print(f'Unloaded: {", ".join(n for n in names if n not in left)}' if names else 'No model was loaded.')
+            if left:
+                print(f'STILL LOADED (could not free): {", ".join(left)}. Quit Ollama from its tray icon or run `ollama stop <model>`.')
+                return 1
     elif a.cmd == 'warm':
         cfg, _ = tasks.load_config()
         m = tasks.model_for(cfg, a.tier)

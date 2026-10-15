@@ -115,14 +115,14 @@ The plugin brings the skill and the MCP server (started with `uvx`, nothing else
 download the models and allow a project folder:
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl readscout setup
 ```
 
 That opens the same setup page as option A: install the models and add your project folders there (skip
 "Coding agents": the plugin already did it). Restart Claude Code.
 
 Tip: to have a short `readscout` command for later, install it once with
-`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl`.
+`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl`.
 
 ### Option C: manual install
 
@@ -130,7 +130,7 @@ Tip: to have a short `readscout` command for later, install it once with
 # 1. Ollama: https://ollama.com/download (then make sure it is running)
 # 2. uv:     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl
 
 # 4. models recommended for your machine (see `readscout hardware` first if you are curious)
 readscout pull
@@ -238,12 +238,27 @@ on 25 reading tasks from four pinned open-source repositories (about 20 s per ta
 
 ## Security and privacy
 
-- Models run on `127.0.0.1` only; any other endpoint is refused in code. No online model, ever, even as a fallback.
+- Models run on `127.0.0.1` only; any other endpoint is refused in code, and so are Ollama cloud models (by name and
+  when Ollama reports them as served by a remote host). readscout never calls an online model, even as a fallback. If you
+  use Ollama itself with cloud features, that is outside readscout; the Ollama settings it offers also switch them off
+  (`OLLAMA_NO_CLOUD=1`).
 - The model has **no tools**: it reads the text readscout gives it and returns JSON. Only readscout reads files, and only
-  inside folders you allowed; `.env`, keys, credential files, `.git` and binaries are refused; secrets are masked before
-  reaching the model, and `local_edit` refuses files that contain one.
-- File contents and model answers are treated as data, never as instructions.
-- The setup page listens on `127.0.0.1`, checks Host and Origin, and requires a per-session token for every change.
+  inside folders you allowed; `.env*`, `.git`, keys, credential files and binaries are refused whatever the letter case;
+  common secret patterns (keys, tokens, `password`/`secret`/`token` assignments, also in JSON) are masked before reaching
+  the model, and `local_edit` refuses files that contain one. Masking is pattern based: it cannot catch every secret, so
+  keep real credentials out of the folders you allow.
+- File contents and model answers are treated as data, never as instructions. Model-written text is flattened to short
+  single lines in the receipts, but it stays unverified: the agent checks the cited lines before deciding.
+- `local_edit` writes atomically, never overwrites a file that changed while the model was working, and restores only
+  what it wrote. Its `gate` commands are run **as you**, without a shell, in the project folder: they are chosen by the
+  calling agent, exactly like the tests it would run itself.
+- Stored locally, in your user folder: `config.json` and `metrics.jsonl` (tool, model, sizes, timings and counts; never
+  file contents, questions or answers). Nothing is sent anywhere. Agent installers back up `~/.codex/config.toml` once
+  (`config.toml.readscout-bak`) and only touch the `mcp_servers.readscout` entry.
+- The setup page listens on `127.0.0.1`, checks Host and Origin, and requires a per-session token for every change. The
+  "Recommended Ollama settings" button saves permanent user environment variables on Windows after asking.
+- Installers ask before installing uv or Ollama (and install nothing when no terminal is available unless you set
+  `READSCOUT_YES=1`). Each release publishes `SHA256SUMS` for the wheel, the sdist and the installers.
 
 Details and reporting: [SECURITY.md](SECURITY.md).
 
@@ -253,6 +268,10 @@ Details and reporting: [SECURITY.md](SECURITY.md).
 - A verified quote proves the line exists, not that the model understood it; the agent opens the cited lines before
   any decision (the skill says so).
 - Lists can be incomplete (the receipt says so when a cap was hit); when completeness matters, add a targeted `grep`.
+- Lines longer than 4000 characters (minified files) are cut and the receipt says so; only the start was read.
+- A quote may differ from the source by whitespace and by line breaks between adjacent lines, nothing else.
+- Tests run without Ollama or a GPU (a fake model); real-model checks (`scripts/e2e.sh`, `scripts/e2e.ps1`) are run by
+  hand before a release and are not part of CI.
 
 ## Uninstall
 

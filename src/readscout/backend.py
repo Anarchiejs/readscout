@@ -4,6 +4,7 @@ Only loopback endpoints are accepted, so file contents can never leave the machi
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,10 @@ LOOPBACK = {'127.0.0.1', 'localhost', '::1'}
 UNLOAD_AFTER = '60s'
 USED: set[tuple[str, str]] = set()   # (url, model) used by this process, unloaded when it exits
 # Settings that let 26B MoE models fit next to an 8 GB GPU (flash attention + 8-bit KV cache).
-OLLAMA_ENV = {'OLLAMA_FLASH_ATTENTION': '1', 'OLLAMA_KV_CACHE_TYPE': 'q8_0', 'OLLAMA_MAX_LOADED_MODELS': '1'}
+OLLAMA_ENV = {'OLLAMA_FLASH_ATTENTION': '1', 'OLLAMA_KV_CACHE_TYPE': 'q8_0', 'OLLAMA_MAX_LOADED_MODELS': '1',
+              'OLLAMA_NO_CLOUD': '1'}   # also switches off Ollama's cloud features (https://docs.ollama.com/faq)
+CLOUD_NAME = re.compile(r'(^|[:/_-])cloud$', re.I)
+CHECKED: set[tuple[str, str]] = set()    # models already confirmed to run on this machine
 
 
 class BackendError(RuntimeError):
@@ -38,6 +42,21 @@ class Model:
     def __post_init__(self):
         if urlparse(self.url).hostname not in LOOPBACK:
             raise BackendError(f'Non-loopback endpoint refused: {self.url}')
+        if CLOUD_NAME.search(self.name):
+            raise BackendError(f'Cloud model refused: {self.name} (readscout only uses models that run on this machine)')
+
+
+def check_local(model: 'Model') -> None:
+    """A loopback address is not enough: Ollama can forward some models to its cloud. Refuse those (once per model)."""
+    key = (model.url, model.name)
+    if key in CHECKED:
+        return
+    with _request(model.url.rstrip('/') + '/api/tags', timeout=5) as r:
+        tags = json.load(r).get('models', [])
+    for m in tags:
+        if model.name in (m.get('name'), m.get('model')) and (m.get('remote_host') or m.get('remote_model')):
+            raise BackendError(f'Cloud model refused: {model.name} is served by a remote host')
+    CHECKED.add(key)
 
 
 @dataclass
@@ -70,6 +89,7 @@ def _parse(text):
 
 
 def chat(model: Model, system: str, user: str, schema: dict, max_tokens=2048, timeout=600, temperature=0.0) -> Reply:
+    check_local(model)
     t = time.time()
     USED.add((model.url, model.name))
     body = {'model': model.name, 'stream': False, 'think': False, 'format': schema, 'keep_alive': model.keep_alive,
@@ -97,13 +117,13 @@ def installed_models(url='http://127.0.0.1:11434') -> set[str]:
     return names | {n.removesuffix(':latest') for n in names}
 
 
-def unload(name: str, url='http://127.0.0.1:11434') -> None:
-    """Free a model's memory now (Ollama unloads it when keep_alive is 0)."""
+def unload(name: str, url='http://127.0.0.1:11434') -> bool:
+    """Free a model's memory now (Ollama unloads it when keep_alive is 0). False if the request failed."""
     try:
         with _request(url.rstrip('/') + '/api/generate', {'model': name, 'keep_alive': 0}, timeout=30):
-            pass
+            return True
     except BackendError:
-        pass
+        return False
 
 
 def unload_used() -> None:
@@ -114,9 +134,7 @@ def unload_used() -> None:
 
 def unload_all(url='http://127.0.0.1:11434') -> list[str]:
     names = loaded_models(url)
-    for name in names:
-        unload(name, url)
-    return names
+    return [name for name in names if unload(name, url)]
 
 
 def loaded_models(url='http://127.0.0.1:11434') -> list[str]:

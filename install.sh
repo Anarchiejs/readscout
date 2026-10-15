@@ -4,12 +4,17 @@
 # Installs what is missing (uv, Ollama) after asking, installs readscout, then opens the setup page.
 # Environment: READSCOUT_YES=1 (no questions), READSCOUT_SOURCE=<pip spec or local path>, READSCOUT_NO_SETUP=1
 set -eu
-SOURCE="${READSCOUT_SOURCE:-https://github.com/Anarchiejs/readscout/releases/download/v0.1.1/readscout-0.1.1-py3-none-any.whl}"
+SOURCE="${READSCOUT_SOURCE:-https://github.com/Anarchiejs/readscout/releases/download/v0.1.2/readscout-0.1.2-py3-none-any.whl}"
 
 ask() {
   [ "${READSCOUT_YES:-0}" = "1" ] && return 0
+  # Without a terminal nobody can answer: never install third-party software silently.
+  if ! { [ -r /dev/tty ] && : </dev/tty; } 2>/dev/null; then
+    echo "$1 -> no terminal to ask: answering no (set READSCOUT_YES=1 to accept)"
+    return 1
+  fi
   printf '%s [Y/n] ' "$1"
-  read -r answer </dev/tty || answer=""
+  read -r answer </dev/tty || return 1
   case "$answer" in ""|[yYoO]*) return 0 ;; *) return 1 ;; esac
 }
 have() { command -v "$1" >/dev/null 2>&1; }

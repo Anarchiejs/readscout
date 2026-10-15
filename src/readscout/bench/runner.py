@@ -18,8 +18,9 @@ def _hit(item, v, family) -> bool:
     if 'span' in item:
         return a <= item['span'][1] and b >= item['span'][0]
     key = item.get('key') or ''
-    if len(key) >= 4 and (key in quote or (family == 'env_vars' and key in text)):
-        return True
+    if len(key) >= 4:
+        # A named target must be named: a finding next to the right line, about something else, is a wrong answer.
+        return key in quote or (family == 'env_vars' and key in text)
     return item['line'] - 1 <= a <= item['line'] + 1
 
 
@@ -32,7 +33,7 @@ def score(task: generate.Task, verified) -> dict:
     if task.family == 'locate':
         precision = 1.0 if verified and _hit(task.gt[0], verified[0], task.family) else (good / len(verified) if verified else 0.0)
     elif task.family == 'log':
-        precision = 1.0 if verified else 0.0      # consequences are legitimate extra findings
+        precision = 1.0 if good else 0.0          # the root cause must be found; consequences are legitimate extra findings
     else:
         precision = good / len(verified) if verified else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0

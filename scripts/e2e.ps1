@@ -57,3 +57,4 @@ Step 'public bench (subset)' { Has (readscout bench --models gemma4:e4b --only l
 Step 'uninstall cleanly' { uv tool uninstall readscout 2>&1 | Out-Null; $global:LASTEXITCODE = [int](Test-Path "$T\bin\readscout.exe") }
 "RESULT: $script:pass passed, $script:fail failed"
 Remove-Item -Recurse -Force $T -ErrorAction SilentlyContinue
+exit ([int]($script:fail -gt 0))

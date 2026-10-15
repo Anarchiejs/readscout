@@ -3,16 +3,18 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
-from .paths import PACKAGE
+from .paths import PACKAGE, cli
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 SKILL = PACKAGE / 'skill' / 'SKILL.md'
 CLAUDE_SKILL = Path.home() / '.claude' / 'skills' / 'readscout' / 'SKILL.md'
 CODEX_SKILL = Path.home() / '.agents' / 'skills' / 'readscout' / 'SKILL.md'
 CODEX_CONFIG = Path.home() / '.codex' / 'config.toml'
-CODEX_SECTION = re.compile(r'(?ms)^\[mcp_servers\.readscout\]\n.*?(?=^\[|\Z)')
+# The table and its sub-tables ([mcp_servers.readscout.env]...), up to the next unrelated table; any line ending.
+CODEX_SECTION = re.compile(r'(?ms)^[ \t]*\[mcp_servers\.readscout(?:\.[^\]\n]*)?\][ \t]*\r?\n.*?(?=^[ \t]*\[(?!mcp_servers\.readscout[\].])|\Z)')
 
 
 def server_command() -> list[str]:
@@ -42,7 +44,7 @@ def status() -> dict:
         out['claude_plugin'] = 'readscout@' in _run([claude, 'plugin', 'list']).stdout
     out['claude_wired'] = (out['claude_mcp'] and out['claude_skill']) or out['claude_plugin']
     if CODEX_CONFIG.exists():
-        out['codex_mcp'] = bool(CODEX_SECTION.search(CODEX_CONFIG.read_text(encoding='utf-8')))
+        out['codex_mcp'] = bool(CODEX_SECTION.search(_read_codex()))
     return out
 
 
@@ -70,20 +72,52 @@ def _toml_str(s: str) -> str:
     return '"' + s.replace('\\', '/').replace('"', '\\"') + '"'
 
 
+def _valid_toml(text: str) -> bool:
+    try:
+        tomllib.loads(text)
+        return True
+    except tomllib.TOMLDecodeError:
+        return False
+
+
+def _read_codex() -> str:
+    return CODEX_CONFIG.read_bytes().decode('utf-8').replace('\r\n', '\n') if CODEX_CONFIG.exists() else ''
+
+
+def _write_codex(text: str):
+    """Write the config, keeping a one-time backup of the user's file and its line endings."""
+    crlf = CODEX_CONFIG.exists() and b'\r\n' in CODEX_CONFIG.read_bytes()
+    backup = CODEX_CONFIG.with_name(CODEX_CONFIG.name + '.readscout-bak')
+    if CODEX_CONFIG.exists() and not backup.exists():
+        shutil.copyfile(CODEX_CONFIG, backup)
+    tmp = CODEX_CONFIG.with_name(CODEX_CONFIG.name + '.readscout-tmp')
+    tmp.write_bytes((text.replace('\n', '\r\n') if crlf else text).encode('utf-8'))
+    tmp.replace(CODEX_CONFIG)
+
+
 def install_codex() -> str:
     CODEX_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    text = CODEX_CONFIG.read_text(encoding='utf-8') if CODEX_CONFIG.exists() else ''
+    text = _read_codex()
+    if not _valid_toml(text):
+        return f'Codex: {CODEX_CONFIG} is not valid TOML, nothing was changed. Fix it, then run `{cli()} install-agent codex` again.'
     cmd = server_command()
     section = f'[mcp_servers.readscout]\ncommand = {_toml_str(cmd[0])}\nargs = [{", ".join(_toml_str(a) for a in cmd[1:])}]\n\n'
-    text = CODEX_SECTION.sub('', text).rstrip() + ('\n\n' if text.strip() else '') + section
-    CODEX_CONFIG.write_text(text, encoding='utf-8')
+    new = CODEX_SECTION.sub('', text).rstrip() + ('\n\n' if text.strip() else '') + section
+    if not _valid_toml(new):
+        return (f'Codex: could not add the server to {CODEX_CONFIG} safely (it already defines mcp_servers.readscout in another form). '
+                f'Nothing was changed. Remove that entry or add this section yourself:\n{section}')
+    _write_codex(new)
     _copy_skill(CODEX_SKILL)
-    return f'Codex: [mcp_servers.readscout] written to {CODEX_CONFIG}, skill copied to {CODEX_SKILL}. Restart Codex.'
+    return f'Codex: [mcp_servers.readscout] written to {CODEX_CONFIG} (backup: {CODEX_CONFIG.name}.readscout-bak), skill copied to {CODEX_SKILL}. Restart Codex.'
 
 
 def uninstall_codex() -> str:
     if CODEX_CONFIG.exists():
-        CODEX_CONFIG.write_text(CODEX_SECTION.sub('', CODEX_CONFIG.read_text(encoding='utf-8')).rstrip() + '\n', encoding='utf-8')
+        text = _read_codex()
+        new = CODEX_SECTION.sub('', text).rstrip() + '\n'
+        if not (_valid_toml(text) and _valid_toml(new)):
+            return f'Codex: {CODEX_CONFIG} is not valid TOML, nothing was changed.'
+        _write_codex(new)
     shutil.rmtree(CODEX_SKILL.parent, ignore_errors=True)
     return 'Codex: readscout removed.'
 
