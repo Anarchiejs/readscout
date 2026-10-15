@@ -192,6 +192,8 @@ readscout install-agent claude|codex   register the MCP server and the skill (un
 readscout ask PATH... -q QUESTION      run local_ask from the terminal (--summary, --quality)
 readscout digest PATH                  run local_digest from the terminal
 readscout edit PATH... -i TEXT --gate "CMD"   run local_edit from the terminal
+readscout folders [add|remove DIR...]  limit the local models to these folders (no list: any folder)
+readscout gate on|off                  allow or forbid local_edit's gate commands
 readscout stats                        what was read locally instead of by your agent
 readscout dashboard                    usage page
 readscout stop                         unload every model now (they also unload by themselves)
@@ -240,10 +242,16 @@ on 25 reading tasks from four pinned open-source repositories (about 20 s per ta
   use Ollama itself with cloud features, that is outside readscout; the Ollama settings it offers also switch them off
   (`OLLAMA_NO_CLOUD=1`).
 - The model has **no tools**: it reads the text readscout gives it and returns JSON. Only readscout reads files: the ones your
-  agent names, in any folder (nothing to register). `.env*`, `.git`, keys, credential files and binaries are refused whatever the letter case;
-  common secret patterns (keys, tokens, `password`/`secret`/`token` assignments, also in JSON) are masked before reaching
-  the model, and `local_edit` refuses files that contain one. Masking is pattern based: it cannot catch every secret, so
-  keep real credentials out of the folders you allow.
+  agent names, by default in any folder (nothing to register). `.env*`, `.git`, keys, credential files and binaries are
+  always refused whatever the letter case; common secrets (provider keys and tokens, JWTs, passwords in URLs,
+  `Authorization` headers, `password`/`secret`/`token` assignments, also in JSON) are masked before reaching the model,
+  and `local_edit` refuses files that contain one. Masking is pattern based: it cannot catch every secret, so keep real
+  credentials out of your projects.
+- **If you restrict your agent** (no Bash, `Read` limited to some folders in Claude Code's permissions), readscout does
+  not see those rules: it reads what the agent names and runs its `gate` commands. To keep the same limits, use
+  `readscout folders add <folder>` (the local models then only read and write inside the listed folders; `readscout
+  folders` shows the list, `readscout folders remove <folder>` drops one) and `readscout gate off` (`local_edit` then
+  refuses any gate command). `readscout doctor` shows both settings.
 - File contents and model answers are treated as data, never as instructions. Model-written text is flattened to short
   single lines in the receipts, but it stays unverified: the agent checks the cited lines before deciding.
 - `local_edit` writes atomically, never overwrites a file that changed while the model was working, and restores only

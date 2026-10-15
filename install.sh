@@ -50,7 +50,7 @@ uv tool update-shell >/dev/null 2>&1 || true
 PATH="$HOME/.local/bin:$PATH"; export PATH
 echo "OK   readscout installed"
 
-# 4. Setup page: hardware, models (1 click), agents, project folders.
+# 4. Setup page: hardware, models (1 click), agents.
 if [ "${READSCOUT_NO_SETUP:-0}" != "1" ]; then
   readscout setup
   echo

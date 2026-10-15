@@ -57,7 +57,8 @@ def state(vram=None, ram=None) -> dict:
     count = len({n for n in installed if not n.endswith(':latest')})
     return {'version': __version__, 'hardware': hardware.as_dict(hw), 'chosen': {'vram_gb': v, 'ram_gb': r},
             'recommended': hardware.recommend(v, r), 'catalog': hardware.catalog()['models'],
-            'ollama': {'count': count if version else 0, 'version': version, 'binary': backend.ollama_binary(), 'installed': installed, 'loaded': backend.loaded_models(url) if version else []},
+            'ollama': {'count': count if version else 0, 'version': version, 'binary': backend.ollama_binary(),
+                       'installed': installed, 'loaded': backend.loaded_models(url) if version else []},
             'config': {'models': cfg['models']},
             'agents': _cached('agents', 30, agents.status), 'pulls': PULLS, 'stats': stats.summary(30)}
 
@@ -120,8 +121,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403 if length <= 65536 else 413, {'error': 'forbidden' if length <= 65536 else 'body too large'})
         try:
             body = json.loads(raw or b'{}')
-            assert isinstance(body, dict)
-        except (ValueError, AssertionError):
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):      # not an assert: `python -O` would drop the check
             return self._send(400, {'error': 'invalid JSON body'})
         try:
             return self._post(body)
@@ -154,7 +156,8 @@ class Handler(BaseHTTPRequestHandler):
             def apply(c):
                 for tier, name in chosen.items():
                     # The context size follows the machine when the page sends it and the model is the recommended one.
-                    ctx = rec[tier]['ctx'] if tier in rec and rec[tier]['model'] == name else c['models'].get(tier, {}).get('ctx', hardware.DEFAULT_CTX)
+                    current = c['models'].get(tier, {}).get('ctx', hardware.DEFAULT_CTX)
+                    ctx = rec[tier]['ctx'] if tier in rec and rec[tier]['model'] == name else current
                     c['models'][tier] = {'name': name, 'ctx': ctx}
             paths.update_config(apply)
             return self._send(200, {'ok': True})

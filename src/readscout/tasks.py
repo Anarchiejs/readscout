@@ -18,8 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import paths
+from . import paths as paths_mod     # `paths` is also the name of the tools' file-list argument
 from .backend import UNLOAD_AFTER, BackendError, Model, chat, ensure_ollama, installed_models
-from .text import AccessError, Line, chunk, is_sensitive, load_lines, locate, redact, render, resolve
+from .text import AccessError, Line, chunk, is_sensitive, load_lines, locate, outside, redact, render, resolve
 
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 TEXT_SUFFIXES = {'.py', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.json', '.md', '.txt', '.yml', '.yaml', '.toml', '.ini',
@@ -66,12 +67,14 @@ def project_of(path: Path, roots: list[Path]) -> Path | None:
     return max((r.resolve() for r in roots if real.is_relative_to(r.resolve())), key=lambda r: len(r.parts), default=None)
 
 
-def expand(paths: list[str], roots: list[Path]) -> list[str]:
+def expand(paths: list[str], roots: list[Path], allowed: list[Path] | None = None) -> list[str]:
     """Accept files and directories (walked recursively for text files). Excluded and sensitive folders are never entered."""
     out = []
     for p in paths:
         cand = Path(p) if Path(p).is_absolute() else next((r / p for r in roots if (r / p).exists()), Path(p))
         if cand.is_dir():
+            if outside(cand.resolve(), allowed):
+                raise AccessError(f'Outside the allowed folders: {p} (the user restricted readscout with `readscout folders`)')
             for dirpath, dirnames, filenames in os.walk(cand):
                 dirnames[:] = sorted(d for d in dirnames if not is_sensitive([d], ''))
                 for name in sorted(filenames):
@@ -83,13 +86,13 @@ def expand(paths: list[str], roots: list[Path]) -> list[str]:
     return out
 
 
-def gather(paths, roots):
+def gather(paths, roots, allowed=None):
     lines, total = [], 0
     explicit = set(paths)
     files = []
-    for p in expand(paths, roots):
+    for p in expand(paths, roots, allowed):
         try:
-            real, shown = resolve(p, roots)
+            real, shown = resolve(p, roots, allowed)
         except AccessError:
             if p in explicit:
                 raise
@@ -103,7 +106,7 @@ def gather(paths, roots):
         if len(owners[shown]) > 1:      # same relative path in two projects: say which one
             label = f'{(project_of(real, roots) or real.parent).name}/{shown}'
         try:
-            got = load_lines(p, roots, label)
+            got = load_lines(p, roots, label, allowed)
         except AccessError:
             if p in explicit:
                 raise
@@ -277,7 +280,8 @@ def _clean(text: str, limit=300) -> str:
 
 
 def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str) -> str:
-    head = (f'[{label} · {model.name}{" (" + model.note + ")" if model.note else ""} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
+    note = f' ({model.note})' if model.note else ''
+    head = (f'[{label} · {model.name}{note} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
             f'{len(out.verified)} verified quote(s), {out.dropped} dropped (quote not found in source)]')
     lines = [head]
     if out.summary:
@@ -312,7 +316,7 @@ def pick_tier(question: str, quality: bool | None) -> str:
 def ask(paths: list[str], question: str, mode='find', quality: bool | None = None, max_items=40) -> str:
     cfg, roots = load_config()
     tier = pick_tier(question, quality)
-    lines = gather(paths, roots)
+    lines = gather(paths, roots, paths_mod.allowed_folders(cfg))
     nbytes = sum(len(l.text) + 1 for l in lines)
     model = model_for(cfg, tier)
     out = run_ask(lines, question, model, mode)
@@ -356,7 +360,7 @@ DIGEST_QUESTION = ('What went wrong? Give first the earliest root-cause error, t
 
 def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     cfg, roots = load_config()
-    lines = load_lines(path, roots)
+    lines = load_lines(path, roots, allowed=paths_mod.allowed_folders(cfg))
     model = model_for(cfg, tier)
     nbytes = sum(len(l.text) + 1 for l in lines)
     kept = prefilter(lines) if nbytes > 20_000 else lines
@@ -443,23 +447,20 @@ def _write_atomic(path: Path, data: bytes):
         tmp.unlink(missing_ok=True)
 
 
-def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None, tier='quality', timeout=300,
-         model: Model | None = None, roots: list[Path] | None = None) -> str:
-    cfg, cfg_roots = load_config() if roots is None else ({}, roots)
-    roots = cfg_roots
-    roots = roots or [Path.cwd().resolve()]
-    gate = _check_gate(gate)
-    model = model or model_for(cfg, tier)
+def _edit_targets(paths: list[str], roots: list[Path], allowed: list[Path]) -> dict[str, Path]:
+    """Display path -> real path for every file of the call, existing or to be created."""
     targets = {}
     for p in paths:
         try:
-            real, shown = resolve(p, roots)
+            real, shown = resolve(p, roots, allowed)
         except AccessError:
             # New file: its folder must already exist, the file must not, and the name must not be sensitive.
             cand = Path(p).expanduser() if Path(p).expanduser().is_absolute() else roots[0] / p
             if not cand.parent.is_dir() or cand.exists():
                 raise
             real = cand.resolve()
+            if outside(real, allowed):
+                raise AccessError(f'Outside the allowed folders: {p} (the user restricted readscout with `readscout folders`)') from None
             proj = project_of(real, roots)
             shown = real.relative_to(proj).as_posix() if proj else real.as_posix()
             if is_sensitive(real.relative_to(proj).parts if proj else real.parts[1:], real.name):
@@ -467,125 +468,174 @@ def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None
         if shown in targets and targets[shown] != real:
             raise AccessError(f'Two different files are both shown as {shown}: pass them in separate calls')
         targets[shown] = real
+    return targets
+
+
+def _gate_folder(targets: dict[str, Path], roots: list[Path]) -> Path:
+    """Where the gate runs: the project of the files, else (outside the agent's folder) the folder they share."""
     project = project_of(next(iter(targets.values())), roots)
-    if project is None:          # outside the agent's folder: gate commands run in the folder the files share
-        try:
-            project = Path(os.path.commonpath([str(t.parent) for t in targets.values()]))
-        except ValueError:
-            raise AccessError('local_edit cannot edit files on different drives in one call') from None
+    if project is not None:
+        return project
+    try:
+        return Path(os.path.commonpath([str(t.parent) for t in targets.values()]))
+    except ValueError:
+        raise AccessError('local_edit cannot edit files on different drives in one call') from None
+
+
+def _read_originals(targets: dict[str, Path]) -> tuple[dict, dict]:
+    """Raw bytes (None for a new file) and the text the model sees (LF line endings). Secrets are never sent."""
     raw = {k: (v.read_bytes() if v.exists() else None) for k, v in targets.items()}
     if sum(len(b) for b in raw.values() if b) > MAX_EDIT_BYTES:
         raise AccessError(f'Files too large for local_edit (over {MAX_EDIT_BYTES // 1000} KB together); edit them yourself')
     try:
-        original = {k: (b.decode('utf-8').replace('\r\n', '\n') if b is not None else None) for k, b in raw.items()}
+        text = {k: (b.decode('utf-8').replace('\r\n', '\n') if b is not None else None) for k, b in raw.items()}
     except UnicodeDecodeError:
         raise AccessError('local_edit only handles UTF-8 text files') from None
-    if any(t is not None and redact(t) != t for t in original.values()):
+    if any(t is not None and redact(t) != t for t in text.values()):
         # The model must see exact text to edit it, so a file with secrets is never sent: the agent edits it itself.
         raise AccessError('A file looks like it contains a secret (key, token, password); edit it yourself')
-    crlf = {k: b is not None and b'\r\n' in b for k, b in raw.items()}
-    written: dict[str, bytes] = {}      # what this call put on disk, so that only its own writes are ever undone
-    made_dirs: list[Path] = []
+    return raw, text
 
-    def encode(k, text):
-        return (text.replace('\n', '\r\n') if crlf[k] else text).encode('utf-8')
 
-    def unchanged_since_read() -> str | None:
-        for k, v in targets.items():
-            now = v.read_bytes() if v.exists() else None
-            if now != raw[k]:
+def _apply_reply(edits, targets: dict[str, Path], original: dict) -> tuple[dict, list[str]]:
+    """Apply the model's search/replace blocks in memory; return the new texts and what could not be applied."""
+    current, failed = dict(original), []
+    for e in edits:
+        if not isinstance(e, dict) or not all(isinstance(e.get(f), str) for f in ('path', 'search', 'replace')):
+            failed.append('malformed edit entry')
+            continue
+        key = e['path'].replace('\\', '/').removeprefix('./')
+        key = next((k for k in targets if k == key or k.endswith('/' + key)), None)
+        if key is None:
+            failed.append(f'path not allowed: {e["path"]}')
+            continue
+        if current[key] is None and not e['search']:
+            current[key] = e['replace']
+            continue
+        new = _apply(current[key] or '', e['search'], e['replace'])
+        if new is None:
+            failed.append(f'search block not found exactly once in {key}')
+        else:
+            current[key] = new
+    return current, failed
+
+
+class _Transaction:
+    """The files of one local_edit call: writes them, and undoes only its own writes."""
+
+    def __init__(self, targets: dict[str, Path], raw: dict):
+        self.targets, self.raw = targets, raw
+        self.crlf = {k: b is not None and b'\r\n' in b for k, b in raw.items()}
+        self.written: dict[str, bytes] = {}      # what this call put on disk, so that only its own writes are undone
+        self.made_dirs: list[Path] = []
+
+    def changed_since_read(self) -> str | None:
+        for k, v in self.targets.items():
+            if (v.read_bytes() if v.exists() else None) != self.raw[k]:
                 return k
         return None
 
-    def restore() -> list[str]:
+    def write(self, current: dict, original: dict):
+        for k, v in self.targets.items():
+            if current[k] == original[k]:
+                continue
+            for parent in reversed(v.parents):
+                if parent.exists():
+                    break
+                self.made_dirs.append(parent)
+            v.parent.mkdir(parents=True, exist_ok=True)
+            data = (current[k].replace('\n', '\r\n') if self.crlf[k] else current[k]).encode('utf-8')
+            _write_atomic(v, data)
+            self.written[k] = data
+
+    def restore(self) -> list[str]:
         """Undo this call's writes. A file somebody else changed since is left alone and reported."""
         left = []
-        for k, data in written.items():
-            v = targets[k]
+        for k, data in self.written.items():
+            v = self.targets[k]
             if not v.exists() or v.read_bytes() != data:
                 left.append(k)
-            elif raw[k] is None:
+            elif self.raw[k] is None:
                 v.unlink(missing_ok=True)
             else:
-                _write_atomic(v, raw[k])
-        for d in reversed(made_dirs):
+                _write_atomic(v, self.raw[k])
+        for d in reversed(self.made_dirs):
             try:
                 d.rmdir()
             except OSError:
                 pass
-        written.clear()
+        self.written.clear()
         return left
+
+
+def _diff(targets, original, current) -> tuple[str, int, int]:
+    diff = ''.join(''.join(difflib.unified_diff((original[k] or '').splitlines(True), current[k].splitlines(True), f'a/{k}', f'b/{k}'))
+                   for k in targets if current[k] != original[k])
+    plus = sum(1 for l in diff.splitlines() if l.startswith('+') and not l.startswith('+++'))
+    minus = sum(1 for l in diff.splitlines() if l.startswith('-') and not l.startswith('---'))
+    return diff, plus, minus
+
+
+def edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None, tier='quality', timeout=300,
+         model: Model | None = None, roots: list[Path] | None = None) -> str:
+    cfg, cfg_roots = load_config() if roots is None else ({}, roots)
+    roots = cfg_roots or [Path.cwd().resolve()]
+    gate = _check_gate(gate)
+    if gate and not paths_mod.gate_allowed(cfg):
+        raise AccessError('gate commands are disabled by the user (`readscout gate off`): call local_edit without a gate '
+                          'and run the checks yourself')
+    model = model or model_for(cfg, tier)
+    targets = _edit_targets(paths, roots, paths_mod.allowed_folders(cfg))
+    project = _gate_folder(targets, roots)
+    raw, original = _read_originals(targets)
+    tx = _Transaction(targets, raw)
+
+    def finish(status, attempts, **extra):
+        record({'tool': 'edit', 'model': model.name, 'status': status, 'attempts': attempts,
+                'seconds': round(time.time() - started, 1), **extra})
 
     files = '\n\n'.join(f'===== FILE {k} =====\n{t if t is not None else "(new file, does not exist yet)"}' for k, t in original.items())
     feedback, started, attempts, log = '', time.time(), 0, []
     for attempts in (1, 2):
-        user = f'{files}\n\nCHANGE TO MAKE:\n{instruction}{feedback}'
         try:
-            reply = chat(model, EDIT_SYSTEM, user, EDIT_SCHEMA, max_tokens=6000, timeout=timeout)
+            reply = chat(model, EDIT_SYSTEM, f'{files}\n\nCHANGE TO MAKE:\n{instruction}{feedback}', EDIT_SCHEMA,
+                         max_tokens=6000, timeout=timeout)
         except BackendError as e:
             log.append(str(e)[:200])
             break
-        current, failed = dict(original), []
-        for e in reply.data.get('edits', []):
-            if not isinstance(e, dict) or not all(isinstance(e.get(f), str) for f in ('path', 'search', 'replace')):
-                failed.append('malformed edit entry')
-                continue
-            key = e['path'].replace('\\', '/').removeprefix('./')
-            key = next((k for k in targets if k == key or k.endswith('/' + key)), None)
-            if key is None:
-                failed.append(f'path not allowed: {e["path"]}')
-                continue
-            if current[key] is None and not e['search']:
-                current[key] = e['replace']
-                continue
-            new = _apply(current[key] or '', e['search'], e['replace'])
-            if new is None:
-                failed.append(f'search block not found exactly once in {key}')
-            else:
-                current[key] = new
+        current, failed = _apply_reply(reply.data.get('edits', []), targets, original)
         if failed or current == original:
             feedback = '\n\nYOUR PREVIOUS ANSWER FAILED: ' + ('; '.join(failed) or 'no change produced') + '. Copy search blocks exactly.'
             log.append(feedback.strip())
             continue
-        changed_by_someone = unchanged_since_read()
+        changed_by_someone = tx.changed_since_read()
         if changed_by_someone:
             # The model took a while: the user or the agent may have edited the file meanwhile. Never overwrite that.
-            record({'tool': 'edit', 'model': model.name, 'status': 'conflict', 'attempts': attempts, 'seconds': round(time.time() - started, 1)})
-            return f'ESCALATE · {changed_by_someone} changed while the local model was working: nothing was written · re-read it and retry or do it yourself.'
+            finish('conflict', attempts)
+            return (f'ESCALATE · {changed_by_someone} changed while the local model was working: nothing was written · '
+                    're-read it and retry or do it yourself.')
         try:
-            for k, v in targets.items():
-                if current[k] == original[k]:
-                    continue
-                for parent in reversed(v.parents):
-                    if parent.exists():
-                        break
-                    made_dirs.append(parent)
-                v.parent.mkdir(parents=True, exist_ok=True)
-                data = encode(k, current[k])
-                _write_atomic(v, data)
-                written[k] = data
+            tx.write(current, original)
         except OSError as e:
-            left = restore()
-            record({'tool': 'edit', 'model': model.name, 'status': 'write_error', 'attempts': attempts, 'seconds': round(time.time() - started, 1)})
-            return f'ESCALATE · could not write the files ({str(e)[:150]}) · changes undone' + (f' except {", ".join(left)} (modified by someone else)' if left else '') + ' · do it yourself.'
+            left = tx.restore()
+            finish('write_error', attempts)
+            return (f'ESCALATE · could not write the files ({str(e)[:150]}) · changes undone'
+                    + (f' except {", ".join(left)} (modified by someone else)' if left else '') + ' · do it yourself.')
         ok, gate_out = _run_gate(gate, project, timeout) if gate else (True, 'no gate configured')
         if ok:
-            diff = ''.join(''.join(difflib.unified_diff((original[k] or '').splitlines(True), current[k].splitlines(True), f'a/{k}', f'b/{k}'))
-                           for k in targets if current[k] != original[k])
-            plus = sum(1 for l in diff.splitlines() if l.startswith('+') and not l.startswith('+++'))
-            minus = sum(1 for l in diff.splitlines() if l.startswith('-') and not l.startswith('---'))
-            record({'tool': 'edit', 'model': model.name, 'status': 'applied', 'attempts': attempts, 'plus': plus, 'minus': minus,
-                    'gate': bool(gate), 'seconds': round(time.time() - started, 1)})
+            diff, plus, minus = _diff(targets, original, current)
+            finish('applied', attempts, plus=plus, minus=minus, gate=bool(gate))
             shown = diff if len(diff.splitlines()) <= 150 else '\n'.join(diff.splitlines()[:150]) + '\n... (diff truncated, see git diff)'
             verdict = 'gate passed' if gate else 'NO gate: review the whole diff before keeping it'
-            return f'APPLIED · {model.name} · {attempts} attempt(s) · +{plus}/-{minus} · {verdict}\n{no_em_dash(_clean(reply.data.get("summary", ""), 400))}\n{shown}'
-        left = restore()
+            summary = no_em_dash(_clean(reply.data.get('summary', ''), 400))
+            return f'APPLIED · {model.name} · {attempts} attempt(s) · +{plus}/-{minus} · {verdict}\n{summary}\n{shown}'
+        left = tx.restore()
         if left:
             log.append(f'not restored, changed by someone else meanwhile: {", ".join(left)}')
         feedback = f'\n\nYOUR PREVIOUS EDIT BROKE THE CHECKS:\n{gate_out}\nFix the change.'
         log.append(gate_out[:300])
-    left = restore()
-    record({'tool': 'edit', 'model': model.name, 'status': 'escalate', 'attempts': attempts, 'seconds': round(time.time() - started, 1)})
+    left = tx.restore()
+    finish('escalate', attempts)
     if left:
         log.append(f'NOT restored, changed by someone else meanwhile: {", ".join(left)}')
     return 'ESCALATE · files restored byte for byte · do it yourself.\n' + '\n'.join(log)[-1500:]

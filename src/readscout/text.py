@@ -4,11 +4,24 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+# Provider tokens with a recognisable shape: private key blocks, OpenAI/Anthropic, GitHub, GitLab, AWS, Slack, Google,
+# Stripe, npm, PyPI, Hugging Face, SendGrid, JWTs and Slack webhooks.
 SECRET = re.compile(r'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END[^-]*-----'
-                    r'|\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}'
-                    r'|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{30,})\b')
-# key = value, key: value and "key": "value" (JSON), also for prefixed or suffixed names (client_secret, DB_PASSWORD, authToken).
-ASSIGNED_SECRET = re.compile(r'(?i)(\b[\w.-]*(?:api[_-]?key|password|passwd|secret|token|private[_-]?key)[\w-]*["\']?\s*[:=]\s*["\']?)[^\s"\',}]{12,}')
+                    r'|\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}'
+                    r'|(?:AKIA|ASIA)[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{30,}|ya29\.[A-Za-z0-9_-]{20,}'
+                    r'|[rsp]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{36}|pypi-[A-Za-z0-9_-]{50,}'
+                    r'|hf_[A-Za-z0-9]{30,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}'
+                    r'|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b'
+                    r'|https://hooks\.slack\.com/services/[A-Za-z0-9/]+')
+# key = value, key: value and "key": "value" (JSON), also for prefixed or suffixed names (client_secret, DB_PASSWORD,
+# authToken, AccountKey). Values of 12 characters or more: shorter ones are code identifiers far more often.
+ASSIGNED_SECRET = re.compile(r'(?i)(\b[\w.-]*(?:api[_-]?key|access[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key'
+                             r'|password|passwd|passphrase|secret|token|private[_-]?key|credentials?|conn(?:ection)?[_-]?string)'
+                             r'[\w-]*["\']?[ \t]*[:=][ \t]*["\']?)[^\s"\',}]{12,}')     # never across a line break
+# The password part of user:password@host in URLs (database DSNs, git remotes), and HTTP authorization headers
+# (a credential has digits; "Basic configuration" in prose does not).
+URL_PASSWORD = re.compile(r'(\b[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@/]{3,}(@)', re.I)
+AUTH_HEADER = re.compile(r'(\b(?:Bearer|Basic|bearer)[ \t]+)(?=[A-Za-z._~+/-]*\d)[A-Za-z0-9._~+/-]{16,}=*')
 SKIPPED_DIRS = {'.git', '.hg', '.svn', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.docker', '.claude', '.codex',
                 'node_modules', '.venv', 'venv', '__pycache__'}
 SKIPPED_SUFFIXES = {'.pem', '.key', '.pfx', '.p12', '.p8', '.jks', '.keystore', '.kdbx', '.gpg', '.sqlite', '.db',
@@ -32,12 +45,18 @@ class Line:
     cut: bool = False   # the line was longer than MAX_LINE_CHARS and its end is not shown to the model
 
 
-def resolve(path: str, roots: list[Path]) -> tuple[Path, str]:
+def outside(real: Path, allowed: list[Path] | None) -> bool:
+    """True when an allow-list is set (`readscout folders add`) and the resolved path is in none of its folders."""
+    return bool(allowed) and not any(real.is_relative_to(a) for a in allowed)
+
+
+def resolve(path: str, roots: list[Path], allowed: list[Path] | None = None) -> tuple[Path, str]:
     """Return the real file path and a display path.
 
-    The agent decides what to read: any file on this machine is allowed, relative paths start at the first root (the
-    folder the agent works in). Only sensitive or binary files are refused. The display path is relative to the folder
-    the file is in (a root, else the home folder) so that `.git` or `.ssh` in the path are recognised, else absolute.
+    By default the agent decides what to read: any file on this machine is allowed, relative paths start at the first
+    root (the folder the agent works in). With an allow-list, files outside its folders are refused. Sensitive or binary
+    files are always refused. The display path is relative to the folder the file is in (a root, else the home folder)
+    so that `.git` or `.ssh` in the path are recognised, else absolute.
     """
     p = Path(path).expanduser()
     candidates = [p] if p.is_absolute() else [r / p for r in roots]
@@ -45,6 +64,8 @@ def resolve(path: str, roots: list[Path]) -> tuple[Path, str]:
         real = c.resolve()
         if not real.is_file():
             continue
+        if outside(real, allowed):
+            raise AccessError(f'Outside the allowed folders: {path} (the user restricted readscout with `readscout folders`)')
         base = next((r.resolve() for r in sorted(roots, key=lambda r: -len(r.resolve().parts)) if real.is_relative_to(r.resolve())), None)
         if base is None:
             home = Path.home().resolve()
@@ -63,7 +84,11 @@ def _mask(m: re.Match) -> str:
 
 
 def redact(text: str) -> str:
-    return ASSIGNED_SECRET.sub(r'\1[REDACTED]', SECRET.sub(_mask, text))
+    """Mask common secrets before any text reaches a model. Pattern based: it lowers the risk, it cannot remove it."""
+    text = SECRET.sub(_mask, text)
+    text = URL_PASSWORD.sub(r'\1[REDACTED]\2', text)
+    text = AUTH_HEADER.sub(r'\1[REDACTED]', text)
+    return ASSIGNED_SECRET.sub(r'\1[REDACTED]', text)
 
 
 def is_sensitive(rel_parts, name: str) -> bool:
@@ -72,8 +97,8 @@ def is_sensitive(rel_parts, name: str) -> bool:
             or Path(name).suffix.lower() in SKIPPED_SUFFIXES or name.lower() in SKIPPED_NAMES)
 
 
-def load_lines(path: str, roots: list[Path], label: str | None = None) -> list[Line]:
-    real, shown = resolve(path, roots)
+def load_lines(path: str, roots: list[Path], label: str | None = None, allowed: list[Path] | None = None) -> list[Line]:
+    real, shown = resolve(path, roots, allowed)
     shown = label or shown
     if real.stat().st_size > MAX_FILE_BYTES:
         raise AccessError(f'File larger than {MAX_FILE_BYTES // 1_000_000} MB: {path}')

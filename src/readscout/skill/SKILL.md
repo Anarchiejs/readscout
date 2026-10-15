@@ -55,6 +55,8 @@ checking real-world facts, architecture): small models produce many false positi
 ## Errors
 
 - "File not found": check the path (relative paths start at your working folder).
+- "Outside the allowed folders" or "gate commands are disabled": the user restricted readscout on purpose. Do not try
+  to work around it; read the file yourself if your own permissions allow it, or run the checks yourself.
 - Any other error: do the task yourself; `readscout doctor` diagnoses the setup. Ollama is started automatically.
 
 ## Memory

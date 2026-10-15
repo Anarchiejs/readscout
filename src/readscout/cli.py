@@ -8,6 +8,8 @@
   readscout ask PATH... -q QUESTION     same as the local_ask tool  [--summary] [--quality]
   readscout digest PATH [-f FOCUS]      same as local_digest
   readscout edit PATH... -i TEXT        same as local_edit  [--gate "cmd args"]...
+  readscout folders [add|remove PATH...] limit the local models to these folders (empty list: any folder)
+  readscout gate on|off                 allow or forbid the gate commands of local_edit
   readscout stats [--days N]            what delegation read locally instead of your agent
   readscout dashboard                   open the usage page
   readscout warm [fast|quality]         preload a model
@@ -49,6 +51,9 @@ def doctor() -> int:
         for tier, spec in cfg['models'].items():
             line(spec['name'] in have, f'{tier} model {spec["name"]} installed', f'readscout pull {spec["name"]}')
     line(paths.config_file().exists(), f'config at {paths.config_file()}', 'readscout setup')
+    allowed = paths.allowed_folders(cfg)
+    print(f'     folders: {", ".join(str(f) for f in allowed) if allowed else "any folder the agent names"}'
+          f'; local_edit gate commands: {"on" if paths.gate_allowed(cfg) else "off"}')
     st = agents.status()
     if st['claude_cli']:
         line(st['claude_wired'], 'Claude Code wired (plugin, or MCP + skill)', 'readscout install-agent claude')
@@ -67,6 +72,40 @@ def print_stats(days):
     print(f"verified findings {s['verified']}, dropped {s['dropped']}; empty answers {s['empty_answers']}; {s['seconds_local']} s of local compute")
     for m, v in s['by_model'].items():
         print(f"  {m:22} {v['calls']} call(s), {v['seconds']:.0f} s")
+
+
+def folders(action: str | None, given: list[str]) -> int:
+    if action and not given:
+        print(f'readscout folders {action} needs at least one folder')
+        return 2
+    wanted = list(dict.fromkeys(Path(f).expanduser().resolve() for f in given))
+    missing = [str(f) for f in wanted if action == 'add' and not f.is_dir()]
+    if missing:
+        print(f'Not a folder: {", ".join(missing)}')
+        return 1
+
+    def apply(c):
+        current = [Path(f) for f in c.get('allowed_folders') or []]
+        if action == 'add':
+            current += [f for f in wanted if f not in current]
+        elif action == 'remove':
+            current = [f for f in current if f not in wanted]
+        c['allowed_folders'] = [str(f) for f in current]
+    cfg = paths.update_config(apply) if action else paths.load_config()
+    allowed = paths.allowed_folders(cfg)
+    if allowed:
+        print('The local models only read and write files in:')
+        for f in allowed:
+            print(f'  {f}')
+    else:
+        print('No folder list: the local models read the files the agent names, in any folder (sensitive files excepted).')
+    return 0
+
+
+def set_gate(state: str):
+    paths.update_config(lambda c: c.__setitem__('allow_gate', state == 'on'))
+    print('local_edit may run gate commands (the project tests) chosen by the agent.' if state == 'on' else
+          'local_edit gate commands are off: the agent must run its checks itself.')
 
 
 def print_hardware():
@@ -143,6 +182,11 @@ def main(argv=None):
     p.add_argument('paths', nargs='+')
     p.add_argument('-i', '--instruction', required=True)
     p.add_argument('--gate', action='append', default=None, help='check command, repeatable')
+    p = sub.add_parser('folders')
+    p.add_argument('action', nargs='?', choices=['add', 'remove'])
+    p.add_argument('folders', nargs='*')
+    p = sub.add_parser('gate')
+    p.add_argument('state', choices=['on', 'off'])
     p = sub.add_parser('stats')
     p.add_argument('--days', type=int, default=30)
     p = sub.add_parser('bench')
@@ -179,6 +223,10 @@ def main(argv=None):
     elif a.cmd == 'edit':
         gate = [[t.strip('"') for t in shlex.split(g, posix=sys.platform != 'win32')] for g in a.gate] if a.gate else None
         print(tasks.edit(a.paths, a.instruction, gate))
+    elif a.cmd == 'folders':
+        return folders(a.action, a.folders)
+    elif a.cmd == 'gate':
+        set_gate(a.state)
     elif a.cmd == 'stats':
         print_stats(a.days)
     elif a.cmd == 'bench':

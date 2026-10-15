@@ -56,7 +56,6 @@ navigateur (`http://127.0.0.1:8765/setup`) :
 - **Modèles** : ceux conseillés pour ta machine, chacun avec un bouton **Install** (un clic, barre de progression),
   puis **Use these models** ;
 - **Agents** : **Connect** pour Claude Code et/ou Codex (serveur MCP + skill) ;
-- **Dossiers de projets** : ajoute les dossiers que les modèles locaux ont le droit de lire ;
 - **Vérification** : tout doit être vert.
 
 Redémarre Claude Code / Codex.
@@ -72,14 +71,14 @@ Uniquement pour Claude Code. Installe d'abord [uv](https://docs.astral.sh/uv/get
 ```
 
 Le plugin apporte le skill et le serveur MCP (lancé par `uvx`, rien d'autre à installer). Ensuite, dans un terminal,
-pour télécharger les modèles et autoriser un dossier :
+pour télécharger les modèles :
 
 ```sh
 uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.5/readscout-0.1.5-py3-none-any.whl readscout setup
 ```
 
-C'est la même page que pour l'option A : installe les modèles et ajoute tes dossiers (la partie « Agents » est déjà
-faite par le plugin). Redémarre Claude Code.
+C'est la même page que pour l'option A : installe les modèles (la partie « Agents » est déjà faite par le
+plugin). Redémarre Claude Code.
 
 ### Option C : installation manuelle
 
@@ -102,7 +101,7 @@ Redémarre Claude Code / Codex.
 ## Premiers pas
 
 1. `readscout doctor` doit finir par `All good.`
-2. Ouvre un projet autorisé dans Claude Code ou Codex.
+2. Ouvre un projet dans Claude Code ou Codex.
 3. Pose une question qui demande beaucoup de lecture, avec tes mots, par exemple :
    - « Quelles routes de `src/routes` ne vérifient pas l'authentification ? »
    - « Où est gérée l'expiration des sessions dans ce dépôt ? »
@@ -137,11 +136,18 @@ de tests), toujours contrôlés par tes tests. Il garde pour lui ce qu'un `grep`
 
 - Les modèles tournent uniquement sur `127.0.0.1` ; les modèles cloud d'Ollama sont refusés (par leur nom et quand Ollama
   les signale comme servis à distance), jamais de modèle en ligne. Le modèle n'a aucun outil ; seul
-  readscout lit les fichiers, et seulement les fichiers que ton agent désigne, dans n'importe quel dossier (rien à enregistrer). `.env*`, `.git`, clés, fichiers d'identifiants et
-  binaires sont refusés (majuscules comprises) ; les secrets courants sont masqués (par motifs : aucun masque n'est
-  parfait, garde les vrais identifiants hors des dossiers autorisés), et `local_edit` refuse les fichiers qui en
-  contiennent. `local_edit` écrit de façon atomique, n'écrase jamais un fichier modifié pendant l'attente du modèle, et
-  ne restaure que ce qu'il a écrit ; ses commandes `gate` s'exécutent avec tes droits, choisies par l'agent.
+  readscout lit les fichiers, et seulement ceux que ton agent désigne. Par défaut, ça peut être n'importe quel dossier
+  (rien à enregistrer). `.env*`, `.git`, clés, fichiers d'identifiants et binaires sont toujours refusés (majuscules
+  comprises) ; les secrets courants sont masqués (clés de fournisseurs, JWT, mots de passe dans les URL, en-têtes
+  `Authorization`, affectations `password`/`secret`/`token`...), et `local_edit` refuse les fichiers qui en contiennent.
+  Le masquage repose sur des motifs : aucun n'est parfait, garde les vrais identifiants hors de tes projets.
+  `local_edit` écrit de façon atomique, n'écrase jamais un fichier modifié pendant l'attente du modèle, et ne restaure
+  que ce qu'il a écrit ; ses commandes `gate` s'exécutent avec tes droits, choisies par l'agent.
+- **Si tu restreins ton agent** (Bash interdit, `Read` limité à certains dossiers dans les permissions de Claude Code),
+  readscout ne voit pas ces règles : il lit ce que l'agent lui désigne et exécute ses commandes `gate`. Pour garder les
+  mêmes limites : `readscout folders add <dossier>` (les modèles ne lisent et n'écrivent plus que dans ces dossiers ;
+  `readscout folders` affiche la liste, `readscout folders remove <dossier>` en retire un) et `readscout gate off`
+  (`local_edit` refuse alors toute commande `gate`). `readscout doctor` affiche les deux réglages.
   Sont stockés en local : `config.json` et `metrics.jsonl` (outil, modèle, tailles, durées ; jamais de contenu).
   Détails : [SECURITY.md](SECURITY.md).
 - Une citation vérifiée prouve que la ligne existe, pas que le modèle l'a bien comprise. Ne délègue ni revue de code,

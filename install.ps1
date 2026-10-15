@@ -60,7 +60,7 @@ uv tool update-shell 2>$null | Out-Null
 Refresh-Path
 Write-Host 'OK   readscout installed' -ForegroundColor Green
 
-# 4. Setup page: hardware, models (1 click), agents, project folders.
+# 4. Setup page: hardware, models (1 click), agents.
 if (-not $NoSetup) {
     & readscout setup
     Write-Host "`nFinish in the page that just opened. Later: 'readscout doctor' checks everything, 'readscout setup' reopens the page."

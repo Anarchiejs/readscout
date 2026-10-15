@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Optional limits for restricted agents.** `readscout folders add <dir>` limits the local models to a list of folders
+  (reads, edits and new files), `readscout gate off` forbids `local_edit` gate commands. readscout cannot see Claude
+  Code's own permission rules, so an agent without Bash or with `Read` deny rules could otherwise get around them. By
+  default nothing changes: any folder, gate on. `readscout doctor` shows both settings.
+- **Wider secret masking:** GitLab, Stripe, npm, PyPI, Hugging Face, SendGrid and Google OAuth tokens, AWS temporary
+  keys, JWTs, Slack webhooks, passwords in URLs (`postgres://user:pass@host`), `Authorization: Bearer/Basic` headers,
+  and more names (`passphrase`, `credentials`, `AccountKey`, `connection_string`...).
+- **Fix:** a `token:` or `password =` at the end of a line no longer masks the start of the next line.
+- `local_edit` split into small, separately readable steps (targets, reading, applying, writing and restoring); no
+  behaviour change. The setup server no longer relies on `assert` to validate request bodies (`python -O` drops them).
+- The French README no longer mentions the project-folder list removed in 0.1.3.
+- Tests for the command line, the Ollama client and the benchmark logs: coverage from 62 % to 76 %; CI now requires 72 %.
+
 ## 0.1.5
 
 - **Model recommendations.** The 12B is now offered from 8 GB of VRAM with 16 GB of RAM (it was measured on 8 GB of VRAM

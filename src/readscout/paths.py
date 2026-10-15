@@ -58,6 +58,17 @@ def load_config() -> dict:
     return cfg
 
 
+def allowed_folders(cfg: dict) -> list[Path]:
+    """Optional allow-list: when set, the local models only read and write files inside these folders.
+    Empty (the default) means any folder the agent names, like the agent itself."""
+    return [Path(f).expanduser().resolve() for f in cfg.get('allowed_folders') or []]
+
+
+def gate_allowed(cfg: dict) -> bool:
+    """`readscout gate off` forbids local_edit's gate commands, for agents whose own shell access is restricted."""
+    return cfg.get('allow_gate', True) is not False
+
+
 def save_config(cfg: dict) -> None:
     p = config_file()
     tmp = p.with_suffix(f'.{os.getpid()}.tmp')
