@@ -45,6 +45,15 @@ if (-not ((Have 'ollama') -or (Test-Path $ollamaApp))) {
 if ((Have 'ollama') -or (Test-Path $ollamaApp)) { Write-Host 'OK   Ollama' }
 
 # 3. readscout itself.
+# On Windows a running readscout (your agent's MCP server, the setup page) locks its files and the reinstall fails with
+# "Access denied": close those processes first (restart your coding agent afterwards).
+$toolDir = Join-Path ((uv tool dir 2>$null) | Select-Object -First 1) 'readscout'
+$running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$toolDir\*" })
+if ($running.Count) {
+    Write-Host "Closing $($running.Count) running readscout process(es); restart your coding agent afterwards." -ForegroundColor Yellow
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
 uv tool install --force --python 3.12 $Source
 if ($LASTEXITCODE) { throw 'readscout installation failed.' }
 uv tool update-shell 2>$null | Out-Null
