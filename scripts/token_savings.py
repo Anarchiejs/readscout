@@ -17,9 +17,9 @@ import tomllib
 from pathlib import Path
 
 from readscout import __version__, hardware, tasks
-from readscout.bench import generate
-from readscout.bench.runner import score
-from readscout.text import Line, locate, redact
+from readscout.bench import corpus, generate
+from readscout.bench.runner import _hit, score
+from readscout.text import AUTH_HEADER, SECRET, URL_PASSWORD, Line, locate
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'docs/token-savings'
@@ -51,7 +51,12 @@ def scrub(text):
             text = text.replace(form, '<HOME>' if base == str(Path.home()) else '<REPO>')
     text = re.sub(r'(?i)[A-Z]:[\\/]+Users[\\/]+[^\\/\s"<>]+', '<HOME>', text)
     text = re.sub(r'(?i)("(?:access_token|refresh_token|id_token|api_key)"\s*:\s*")[^"]+', r'\1[REDACTED]', text)
-    return redact(text).replace(chr(0x2014), '-')
+    # Broad assignment redaction also masks public code such as apiKey: process.env.X
+    # and can break JSON escaping. Use credential-shaped patterns for public corpus
+    # evidence; authentication files are never part of the captured data.
+    text = SECRET.sub('[REDACTED]', text)
+    text = URL_PASSWORD.sub(r'\1[REDACTED]\2', text)
+    return AUTH_HEADER.sub(r'\1[REDACTED]', text).replace(chr(0x2014), '-')
 
 
 def parse_events(raw):
@@ -116,7 +121,11 @@ def grade_answer(task, answer):
         result['precision'] = round(result['precision'] * len(verified) / (len(verified) + wrong), 3)
         p, r = result['precision'], result['recall']
         result['f1'] = round(2 * p * r / (p + r), 3) if p + r else 0.0
-    return {**result, 'unverifiable': wrong, 'verified': len(verified), 'locations': details}
+    missing = [g for g in task.gt if not any(_hit(g, v, task.family) for v in verified)]
+    incorrect = [{'path': v[0], 'line': v[1], 'answer': v[3], 'quote': v[4]} for v in verified
+                 if not any(_hit(g, v, task.family) for g in task.gt)]
+    return {**result, 'unverifiable': wrong, 'verified': len(verified), 'locations': details,
+            'missing_ground_truth': missing, 'incorrect_verified': incorrect}
 
 
 def size(task):
@@ -242,6 +251,8 @@ def sandbox_probe(work):
 def prepare():
     if POINTER.exists():
         raise SystemExit('Existing workspace: do not overwrite it')
+    if (OUT / 'results.json').exists() and json.loads((OUT / 'results.json').read_text()).get('attempts'):
+        raise SystemExit('Published campaign exists. Use a fresh temporary checkout with generated artifacts moved aside.')
     work = Path(tempfile.mkdtemp(prefix='readscout-token-savings-'))
     write_json(POINTER, {'work': str(work)})
     user_config = tomllib.loads((Path.home() / '.codex/config.toml').read_text(encoding='utf-8'))
@@ -370,6 +381,14 @@ Missing metrics are not measured, never zero-filled as measurements.
     (OUT / 'PROTOCOL.md').write_text(text, encoding='utf-8')
 
 
+def exec_args(model, effort, root, final, schema=None):
+    """Session overrides must follow exec on the measured Windows CLI version."""
+    args = ['codex', '--no-daemon', 'exec', *ISOLATED_FLAGS[1:], '--json', '--ephemeral',
+            '--skip-git-repo-check', '--sandbox', 'read-only', '-c', 'approval_policy="never"',
+            '-m', model, '-c', 'model_reasoning_effort=' + json.dumps(effort), '-C', str(root), '-o', str(final)]
+    return args + (['--output-schema', str(schema)] if schema else [])
+
+
 def run_one(work, meta, task, config, attempt=1):
     key = task.id if task else 'control'
     slug = key.replace(':', '_') + f'-{config}-{attempt}'
@@ -381,12 +400,8 @@ def run_one(work, meta, task, config, attempt=1):
         text += '\n[mcp_servers.readscout.env]\nREADSCOUT_HOME = ' + json.dumps(metrics.as_posix()) + '\n'
         cfg.write_text(text, encoding='utf-8')
     final = work / f'{slug}.json'
-    args = ['codex', '--no-daemon', 'exec', *ISOLATED_FLAGS[1:], '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
-            '-c', 'approval_policy="never"', '-m', meta['model'], '-c',
-            'model_reasoning_effort=' + json.dumps(meta['effort']), '-C', str(task.root if task else work),
-            '-o', str(final)]
-    if task:
-        args += ['--output-schema', str(work / 'schema.json')]
+    args = exec_args(meta['model'], meta['effort'], task.root if task else work, final,
+                     work / 'schema.json' if task else None)
     prompt = PROMPT.format(question=task.question, paths=', '.join(task.paths)) if task else 'Reply with the word OK.'
     args += [prompt]
     started = time.time()
@@ -423,7 +438,8 @@ def run_one(work, meta, task, config, attempt=1):
     run_dir = OUT / 'runs'
     run_dir.mkdir(exist_ok=True)
     (run_dir / f'{slug}.jsonl').write_text(scrub(stdout), encoding='utf-8')
-    (run_dir / f'{slug}.answer.json').write_text(scrub(raw_answer), encoding='utf-8')
+    suffix = 'json' if task else 'txt'
+    (run_dir / f'{slug}.answer.{suffix}').write_text(scrub(raw_answer), encoding='utf-8')
     if config == 'B':
         # Stop only if models were not resident before this session.
         from readscout import backend
@@ -489,6 +505,70 @@ def total(row, discount=1):
     return usage['input_tokens'] + usage['output_tokens'] - (1 - discount) * usage.get('cached_input_tokens', 0)
 
 
+def read_calls(row):
+    return sum(v for k, v in row['mcp_calls'].items() if k.endswith(('.local_ask', '.local_digest')))
+
+
+def grade():
+    """Regrade blind from saved answers, restoring unmodified private evidence if available."""
+    meta = json.loads((OUT / 'results.json').read_text(encoding='utf-8'))
+    temporary = not POINTER.exists()
+    work = state() if not temporary else Path(tempfile.mkdtemp(prefix='readscout-token-grading-'))
+    os.environ['READSCOUT_HOME'] = str(work / 'corpus-state')
+    by_id = {t.id: t for t in generate.build()}
+    meta['source_licenses'] = [{'name': repo.name, 'github': repo.github, 'commit': repo.commit,
+                               'license': (corpus.fetch(repo) / 'LICENSE').read_text(encoding='utf-8')}
+                              for repo in corpus.REPOS]
+    for task_row in meta['tasks']:
+        task_row['ground_truth_count'] = len(by_id[task_row['id']].gt)
+        task_row['family'] = by_id[task_row['id']].family
+    for row in meta['attempts'] + meta['controls']:
+        slug = row['task'].replace(':', '_') + f"-{row['config']}-{row['attempt']}"
+        journal = work / f'{slug}.started.json'
+        if journal.exists():
+            row['started_epoch'] = json.loads(journal.read_text())['started']
+            row['finished_epoch'] = row['started_epoch'] + row['wall_seconds']
+        final = work / f'{slug}.json'
+        if final.exists():
+            raw_answer = final.read_text(encoding='utf-8')
+            row['answer'] = json.loads(raw_answer) if row['task'] != 'control' else raw_answer
+            suffix = 'txt' if row['task'] == 'control' else 'json'
+            (OUT / 'runs' / f'{slug}.answer.{suffix}').write_text(scrub(raw_answer), encoding='utf-8')
+            if suffix == 'txt':
+                (OUT / 'runs' / f'{slug}.answer.json').unlink(missing_ok=True)
+        raw = work / f'{slug}.events.jsonl'
+        if raw.exists():
+            stdout = raw.read_text(encoding='utf-8', errors='replace')
+            parsed = parse_events(stdout)
+            if parsed['usage'] != row['usage']:
+                raise ValueError('Usage changed during evidence restoration')
+            (OUT / 'runs' / f'{slug}.jsonl').write_text(scrub(stdout), encoding='utf-8')
+        if row['task'] in by_id:
+            before = row['grade']['f1']
+            row['grade'] = grade_answer(by_id[row['task']], row['answer'])
+            if row['grade']['f1'] != before:
+                raise ValueError('Blind regrading changed F1: inspect before reporting')
+    # Restore discarded raw evidence with the corrected scrubber, without rerunning anything.
+    for private, public in [('invalid-pilot', 'discarded'), ('invalid-pilot-options', 'discarded-options')]:
+        for p in (work / private).glob('*'):
+            if p.is_file():
+                dest = OUT / 'runs' / public / p.name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(scrub(p.read_text(encoding='utf-8', errors='replace')), encoding='utf-8')
+    meta['raw_bytes'] = sum(p.stat().st_size for p in (OUT / 'runs').rglob('*') if p.is_file())
+    meta['postprocessing'] = ('After all measured sessions, narrowed evidence redaction to preserve public '
+                             'source expressions and JSON escaping. Restored retained and discarded streams '
+                             'from private originals; all usage counters and blind F1 scores remained identical.')
+    meta['cpu_name'] = command(['powershell.exe', '-NoProfile', '-Command',
+                               '(Get-CimInstance Win32_Processor).Name']).stdout.strip() if sys.platform == 'win32' else meta['cpu']
+    write_json(OUT / 'results.json', json.loads(scrub(json.dumps(meta))))
+    if temporary:
+        if work.parent.resolve() != Path(tempfile.gettempdir()).resolve() or not work.name.startswith('readscout-token-grading-'):
+            raise ValueError('Unsafe grading cleanup path')
+        shutil.rmtree(work)
+    print('Evidence restored; all original token totals and F1 scores confirmed.')
+
+
 def aggregates(meta):
     paired = []
     for task in meta['tasks']:
@@ -510,7 +590,10 @@ def aggregates(meta):
                             'median': statistics.median(p['saving'] for p in pairs),
                             'min': min(p['saving'] for p in pairs), 'max': max(p['saving'] for p in pairs),
                             'f1_A': statistics.mean(p['A']['grade']['f1'] for p in pairs),
-                            'f1_B': statistics.mean(p['B']['grade']['f1'] for p in pairs)}
+                            'f1_B': statistics.mean(p['B']['grade']['f1'] for p in pairs),
+                            'wall_A': round(sum(p['A']['wall_seconds'] for p in pairs), 3),
+                            'wall_B': round(sum(p['B']['wall_seconds'] for p in pairs), 3),
+                            'read_calls_B': sum(read_calls(p['B']) for p in pairs)}
     return paired, summaries
 
 
@@ -521,17 +604,29 @@ def report():
     write_json(OUT / 'results.json', meta)
     overall = summaries['overall']
     complete = len(paired) == len(meta['tasks'])
+    delegated = [p for p in paired if read_calls(p['B'])]
+    no_delegation = [p for p in paired if not read_calls(p['B'])]
+    used_models = sorted({m['model'] for p in delegated for m in p['B']['metrics']})
+    # These are report calculations, not extra experiment runs.
+    meta['derived'] = {'delegated_tasks': len(delegated), 'nondelegated_tasks': len(no_delegation),
+                       'unverifiable': {c: sum(p[c]['grade']['unverifiable'] for p in paired) for c in 'AB'},
+                       'usage_keys': sorted({k for r in meta['attempts'] for k in r['usage']})}
+    write_json(OUT / 'results.json', meta)
     lines = ['# Measured Codex token savings', '', '## TL;DR', '']
     if not complete:
         lines += ['The campaign is incomplete. No overall token-saving claim is supported.',
                   f"Completed pairs: {len(paired)} of {len(meta['tasks'])}; retained attempts: {len(meta['attempts'])}."]
     if overall:
-        lines += [f"Observed paired total: A {overall['A']:,} tokens; B {overall['B']:,}; saving {overall['saving']:.1%}.",
+        change = f"{abs(overall['saving']):.1%} fewer" if overall['saving'] >= 0 else f"{abs(overall['saving']):.1%} more"
+        lines += [f"Observed paired total: A {overall['A']:,} tokens; B {overall['B']:,}; B uses {change} tokens.",
                   'By group: ' + '; '.join(f"{g} {s['saving']:.1%}" if s else f'{g}: not measured'
                                          for g, s in summaries.items() if g != 'overall') + '.',
                   f"Tasks saving/tied/costing more: {sum(p['saving'] > 0 for p in paired)}/"
                   f"{sum(p['saving'] == 0 for p in paired)}/{sum(p['saving'] < 0 for p in paired)}. "
                   f"Mean F1 A {overall['f1_A']:.3f}; B {overall['f1_B']:.3f}."]
+        a0, b0 = (sum(total(p[c], 0) for p in paired) for c in 'AB')
+        lines += [f"Excluding cached input, A {a0:,} versus B {b0:,}: {(a0-b0)/a0:.1%} saved. "
+                  f"Only {len(delegated)} of {len(paired)} B tasks called readscout; this does not establish a general saving."]
     else:
         lines += ['Tokens A versus B, overall and per group savings, and comparative accuracy: not measured.']
     lines += ['', '## Setup', '', f"Date: {meta['date']}; seed: {meta['seed']}; Codex: {meta['codex']}; "
@@ -541,6 +636,15 @@ def report():
               'See the frozen [protocol](token-savings/PROTOCOL.md). Identical task prompts, temporary isolated homes, '
               'read-only Codex sessions, sequential paired runs, existing benchmark scoring and source-verified quotes. '
               'All numbers on this page are generated from [results.json](token-savings/results.json).', '',
+              'W: large inputs; N: negative questions; M: medium; L: small or easy-to-grep. '
+              'Positive savings favor B; a negative saving means B consumed more tokens.', '',
+              f"CPU: {meta.get('cpu_name', meta['cpu'])}. Models actually used by retained reading calls: {', '.join(used_models)}. "
+              'The repository source matches the release under test; exact source hashes are recorded.', '',
+              'Primary totals include cached input and reasoning output. A deterministic localhost transport test '
+              'confirmed that the CLI preserves upstream input/output totals and reports cache/reasoning components separately. '
+              'The synthetic test is excluded from all measurements. CLI turns count user turns, not model requests. '
+              'Returned MCP characters serialize the complete result including wrappers; readscout chars_returned '
+              'counts the receipt alone. Wall time covers Codex execution and excludes stop/cleanup.', '',
               '## Per-task results', '',
               '| Task | Group | A in/cache/out/total | B in/cache/out/total | Saving | Shell A/B | MCP A/B | Seconds A/B | F1 A/B | Read calls B |',
               '|---|---|---|---|---|---|---|---|---|---|']
@@ -560,10 +664,11 @@ def report():
         else:
             extra = 'not measured | not measured | not measured | not measured | not measured | not measured'
         lines.append(f"| {task['id']} | {task['group']} | {token_cell(a)} | {token_cell(b)} | {extra} |")
-    lines += ['', '## Aggregates', '', '| Group | Pairs | A total | B total | Saving | Median | Min | Max |',
-              '|---|---|---|---|---|---|---|---|']
+    lines += ['', '## Aggregates', '', '| Group | Pairs | A total | B total | Saving | Median | Min | Max | F1 A/B | Seconds A/B | Read calls B |',
+              '|---|---|---|---|---|---|---|---|---|---|---|']
     for g, s in summaries.items():
-        lines.append(f"| {g} | {s['pairs']} | {s['A']} | {s['B']} | {s['saving']:.1%} | {s['median']:.1%} | {s['min']:.1%} | {s['max']:.1%} |"
+        lines.append(f"| {g} | {s['pairs']} | {s['A']} | {s['B']} | {s['saving']:.1%} | {s['median']:.1%} | {s['min']:.1%} | {s['max']:.1%} | "
+                     f"{s['f1_A']:.3f}/{s['f1_B']:.3f} | {s['wall_A']}/{s['wall_B']} | {s['read_calls_B']} |"
                      if s else f'| {g} | not measured | not measured | not measured | not measured | not measured | not measured | not measured |')
     lines += ['', 'Secondary views (cached input discount is an assumption, not a price):', '',
               '| Cache weight | A | B | Saving |', '|---|---|---|---|']
@@ -574,20 +679,65 @@ def report():
     lines += ['', '## Accuracy', '']
     for p in paired:
         a, b = p['A']['grade'], p['B']['grade']
-        lines.append(f"- {p['id']}: F1 A/B {a['f1']}/{b['f1']}; unverifiable A/B {a['unverifiable']}/{b['unverifiable']}. "
-                     'Inspect retained answers and locations for missing, incorrect or unverifiable findings.')
+        lines.append(f"- {p['id']}: F1 A/B {a['f1']}/{b['f1']}; unverifiable A/B {a['unverifiable']}/{b['unverifiable']}.")
+        for config, grade_row in [('A', a), ('B', b)]:
+            missing = grade_row.get('missing_ground_truth', [])
+            incorrect = grade_row.get('incorrect_verified', [])
+            if missing or incorrect:
+                locations = ', '.join(f"{g['path']}:{g['line']}" + (f" ({g['key']})" if g.get('key') else '') for g in missing)
+                lines.append(f"  {config}: missing frozen targets: {locations or 'none'}; "
+                             f"non-target verified findings: {len(incorrect)}" +
+                             (' (supporting log consequences are permitted by the scorer).' if p['id'].startswith('logs:') else '.'))
+            for location in grade_row['locations']:
+                if location.get('error'):
+                    lines.append(f"  {config} unverifiable quote: `{location['finding']['quote']}`. {location['error']}.")
     if not paired:
         lines.append('Comparative accuracy: not measured. No completed pair with usage telemetry.')
-    lines += ['', '## Where readscout helps, hurts, and break-even', '']
+    omitted_routes = sorted({f"{g['path']}:{g['line']}" for p in paired for c in 'AB'
+                             if p['id'].startswith('hackathon:') and 'env' not in p['id']
+                             for g in p[c]['grade'].get('missing_ground_truth', [])})
+    unverifiable = meta['derived']['unverifiable']
+    lines += ['', 'The lower-scoring negative and rate-limit answers both identify the upload route '
+              f"at {', '.join(omitted_routes)}, but alter its quoted code. The source verifier correctly rejects those quotes. "
+              f"Unverifiable findings: A {unverifiable['A']}, B {unverifiable['B']}. "
+              'The environment-task scorer also requires the ground-truth file, although the question asks for one '
+              'finding per variable: a valid occurrence of the same variable in another controller is penalized. '
+              'Those location penalties are retained for comparability and should not be read as invented variable names. '
+              'A also returns an additional GROQ_MODEL occurrence, reducing precision. The existing scorer, not a new '
+              'semantic judge, determines all primary F1 scores.', '',
+              '## Where readscout helps, hurts, and break-even', '']
     if paired:
         lines += ['Observed winners: ' + ', '.join(p['id'] for p in paired if p['saving'] > 0) + '.',
                   'Observed costs/ties: ' + ', '.join(p['id'] for p in paired if p['saving'] <= 0) + '.']
-    lines += ['A reliable size break-even is not measured: task shape and grep strategy confound size, and there is no replication.',
+    for p in delegated:
+        lines.append(f"- Delegated {p['id']}, {p['bytes']:,} source bytes: saving {p['saving']:.1%}, "
+                     f"wall A/B {p['A']['wall_seconds']}/{p['B']['wall_seconds']} seconds.")
+    log_pairs = [p for p in delegated if p['id'].startswith('logs:')]
+    winners = [p['bytes'] for p in log_pairs if p['saving'] > 0]
+    losers = [p['bytes'] for p in log_pairs if p['saving'] <= 0]
+    if winners and losers:
+        lines.append(f"The observed log transition lies between the losing {max(losers):,}-byte sample and the "
+                     f"smallest winning {min(winners):,}-byte sample. This is an observed bracket, not a validated threshold.")
+    lines += [f"Only {len(delegated)} B tasks actually delegated. Savings on the other {len(no_delegation)} tasks reflect "
+              'agent strategy, skill overhead and nondeterminism, not content displaced by a local model. '
+              'In particular, the rate-limit task changes shell strategy without calling readscout. '
+              'The negative FastAPI call returns an incomplete receipt; the agent reads the source afterwards, paying for both paths.',
+              'A reliable general size break-even is not measured: task shape and grep strategy confound size, and there is no replication. '
+              'No delegation threshold is changed from these data.',
               '', '## Fixed-overhead controls', '', '| Config | Tokens | Seconds | Status |', '|---|---|---|---|']
+    if paired:
+        lines.insert(lines.index('## Fixed-overhead controls') - 1,
+                     f"Delegated-task A-B difference: {sum(total(p['A'])-total(p['B']) for p in delegated):,} tokens. "
+                     f"Nondelegated-task A-B difference: {sum(total(p['A'])-total(p['B']) for p in no_delegation):,} tokens.")
     for r in meta['controls']:
         lines.append(f"| {r['config']} | {total(r)} | {r['wall_seconds']} | {r['exit_code']} |")
     if not meta['controls']:
         lines.append('Controls: not measured because the pilot did not validate the campaign.')
+    elif len(meta['controls']) == 2:
+        ca, cb = (next(r for r in meta['controls'] if r['config'] == c) for c in 'AB')
+        lines.append(f"\nB adds {total(cb)-total(ca):,} reported tokens on the trivial control "
+                     f"({(total(cb)-total(ca))/total(ca):.1%}). This measures idle discovery overhead; "
+                     'loading the skill and making tool calls adds further overhead during real tasks.')
     lines += ['', '## Dashboard estimate versus measured savings', '']
     if paired:
         estimate = sum(max(0, round((sum(m.get('bytes_read', 0) for m in p['B']['metrics']) -
@@ -595,6 +745,23 @@ def report():
         actual = overall['A'] - overall['B']
         lines += [f'Dashboard estimate sum: {estimate} tokens. Actual paired difference: {actual} tokens.',
                   f'Estimate/difference ratio: {estimate / actual:.3f}.' if actual > 0 else 'A positive savings ratio is not defined.']
+        lines += ['', '| Task with a reading call | Estimated avoided | Actual A-B | Ratio when saving |', '|---|---|---|---|']
+        for p in delegated:
+            est = max(0, round((sum(m.get('bytes_read', 0) for m in p['B']['metrics']) -
+                                sum(m.get('chars_returned', 0) for m in p['B']['metrics'])) / 3.5))
+            delta = total(p['A']) - total(p['B'])
+            ratio = f'{est/delta:.2f}' if delta > 0 else 'not defined'
+            lines.append(f"| {p['id']} | {est:,} | {delta:,} | {ratio} |")
+        lines.append('\nThe estimate subtracts receipt length from locally read text, as if the agent would read all of it. '
+                     'The baseline often greps instead. Tool schemas, skill loading, reasoning, repeated prompts and '
+                     'fallback source reads are excluded from the estimate. A single calibrated multiplier would be unjustified; '
+                     'the formula is left unchanged.')
+        lines += ['', '| Local call | Model | Bytes read | Receipt chars | Verified/dropped | Local seconds |',
+                  '|---|---|---|---|---|---|']
+        for p in delegated:
+            for m in p['B']['metrics']:
+                lines.append(f"| {p['id']} | {m['model']} | {m['bytes_read']} | {m['chars_returned']} | "
+                             f"{m['verified']}/{m['dropped']} | {m['seconds']} |")
     else:
         estimate, actual = None, None
         lines.append('Not measured: no comparable token totals. The dashboard formula is not an agent-session measurement.')
@@ -607,26 +774,59 @@ def report():
     for h in ('H1', 'H2', 'H3', 'H4', 'H5'):
         verdict = ('confirmed' if verdicts[h] else 'refuted') if h in verdicts else 'inconclusive'
         lines.append(f'- {h}: {verdict}. Evidence: the aggregate and per-task measurements above; definitions in the protocol.')
+    if overall:
+        lines += [f"\nH1: W {summaries['W']['saving']:.1%} versus the preregistered minimum {0.1:.0%}. "
+                  f"H2: L {summaries['L']['saving']:.1%}. H3: mean F1 difference B-A "
+                  f"{overall['f1_B']-overall['f1_A']:+.4f}. H4: proxy {estimate:,} versus measured difference "
+                  f"{actual:,}; numerical overestimation, not evidence of real savings. "
+                  f"H5: {len(no_delegation)} of {len(paired)} B tasks made no reading call."]
     lines += ['', '## Limitations and threats to validity', '',
               'One run per cell supports no significance claim. One model and machine, a public corpus authored by this '
               'project, prompt caching, pilot-first order, model loading and nondeterminism limit generalization. '
-              'Reasoning output tokens are not measured if absent from CLI telemetry. Cache inclusion cannot be '
-              'established from an absent counter. Missing sessions are not zero-token successes.', '',
+              'Actual cache hits differ between configurations; discounted totals are sensitivity analyses, not currency costs. '
+              'All CLI usage fields, including reasoning output, are retained. Separate model-load duration and per-call '
+              'residency were not measured: the harness captured local wall time, not Ollama load telemetry. '
+              'No per-session warmup was performed. Some retained pilot work overlapped lightweight local transport diagnostics; '
+              'the shared machine was not otherwise reserved. The scorer checks locations and selected variable keys, '
+              'not the full correctness of every natural-language method/path description. '
+              'Missing sessions are not zero-token successes.', '',
               '### Deviations and observed failures', '']
     lines += meta['deviations'] or ['No deviations recorded.']
+    if meta.get('postprocessing'):
+        lines.append(meta['postprocessing'])
+    discarded = meta.get('discarded_attempts', [])
+    if discarded:
+        measured = [r for r in discarded if r.get('usage') and total(r) is not None]
+        lines.append(f"\nDiscarded preparation attempts: {len(discarded)}; {len(measured)} have completed usage counters, "
+                     f"summing to {sum(total(r) for r in measured):,} reported tokens. Other preparation usage is not measured. "
+                     'These are additional setup consumption, excluded from paired comparisons and never hidden as free runs.')
+    lines.append(f"\nRetained raw evidence: {meta.get('raw_bytes', 'not measured')} bytes, including discarded traces. "
+                 'The original source under test was not changed during any measured session.')
     for r in meta['attempts']:
         if r['exit_code'] != 0 or r['errors']:
             lines += [f"- {r['task']} {r['config']}, attempt {r['attempt']}: exit {r['exit_code']}, timeout {r['timeout']}, "
                       f"wall {r['wall_seconds']} seconds; errors: `{json.dumps(r['errors'])}`. "
                       f"stderr: `{r['stderr'][:2500]}`."]
     lines += ['', '## Reproduce', '',
-              'Use the repository venv at the recorded source revision and the recorded Codex/Ollama versions. '
+              f"Use a temporary checkout of frozen source `{meta['source_commit']}`, copy the final harness and local probe "
+              'from this branch into scripts/, create its development venv and use the recorded Codex/Ollama versions. '
+              'For a new campaign, move any published generated artifacts aside in that temporary checkout; '
+              'prepare refuses to overwrite an existing campaign. '
               'Run `python scripts/token_savings.py prepare`, review and commit the protocol and harness, then '
-              '`pilot`, `controls`, `remaining`, `report`, and `cleanup` in that order. '
+              '`pilot`, `controls`, `remaining`, `grade`, `report`, and `cleanup` in that order. '
+              'If the natural pilot makes no reading call, run `python scripts/token_savings.py validate-mcp` '
+              'and commit its protocol amendment before controls; the [local probe](../scripts/token_savings_probe.py) '
+              'uses a deterministic loopback provider with no online model or credentials. Do not repeat the pilot. '
               'The run commands resume without repeating existing cells. Never reinterpret a failed pilot as a savings result. '
               'The report subcommand works offline using only results.json. All retained raw attempts are in '
               '[runs/](token-savings/runs/).']
     (ROOT / 'docs/TOKEN-SAVINGS.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    notices = ['# Public source notices', '', 'Raw agent transcripts contain excerpts from these pinned MIT repositories. '
+               'Synthetic logs are generated by readscout.', '']
+    for repo in meta.get('source_licenses', []):
+        notices += [f"## {repo['name']}", '', f"https://github.com/{repo['github']}/tree/{repo['commit']}",
+                    '', '```text', repo['license'].strip(), '```', '']
+    (OUT / 'SOURCES.md').write_text('\n'.join(notices), encoding='utf-8')
     chart = ['<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" role="img" aria-label="Paired token totals">',
              '<rect width="100%" height="100%" fill="white"/>',
              '<text x="20" y="25" font-family="sans-serif" font-size="20">Codex reported total tokens: A (blue), B (orange)</text>']
@@ -649,10 +849,16 @@ def report():
         content = p.read_text(encoding='utf-8')
         start, end = '<!-- token-savings:start -->', '<!-- token-savings:end -->'
         if complete:
-            paragraph = (f"Mesure Codex : A {overall['A']:,} tokens contre B {overall['B']:,}, soit {overall['saving']:.1%} "
-                         'économisés. Une exécution par tâche sur une seule machine ne permet pas de généraliser.' if french else
-                         f"Measured Codex totals: A {overall['A']:,} tokens versus B {overall['B']:,}, {overall['saving']:.1%} saved. "
-                         'One run per task on one machine does not establish a general saving.')
+            delta = abs(overall['saving'])
+            direction_fr = 'en moins' if overall['saving'] >= 0 else 'en plus'
+            direction_en = 'fewer' if overall['saving'] >= 0 else 'more'
+            paragraph = (f"Sur {len(paired)} tâches Codex, A utilise {overall['A']:,} tokens et B, avec readscout, "
+                         f"{overall['B']:,}, soit {delta:.1%} {direction_fr}. "
+                         f"Readscout est appelé sur {len(delegated)} tâches ; une exécution par cas sur une seule machine "
+                         'ne démontre pas une économie générale.' if french else
+                         f"Across {len(paired)} Codex tasks, A uses {overall['A']:,} tokens and B, with readscout enabled, "
+                         f"uses {overall['B']:,}: {delta:.1%} {direction_en}. "
+                         f"Only {len(delegated)} tasks call readscout; one run per case on one machine does not establish a general saving.")
         else:
             paragraph = ('La mesure des économies de tokens reste incomplète : aucune économie globale vérifiée à annoncer.' if french else
                          'The token-savings experiment is incomplete: no verified overall savings to claim.')
@@ -668,10 +874,33 @@ def report():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'pilot', 'remaining', 'controls', 'report', 'cleanup'])
+    parser.add_argument('action', choices=['prepare', 'pilot', 'validate-mcp', 'remaining', 'controls', 'grade', 'report', 'cleanup'])
     args = parser.parse_args()
     if args.action == 'prepare':
         prepare()
+    elif args.action == 'grade':
+        grade()
+    elif args.action == 'validate-mcp':
+        from token_savings_probe import probe
+        work = state()
+        meta = json.loads((work / 'meta.json').read_text())
+        if len(meta['attempts']) != len(PILOT) * 2 or any(r['exit_code'] != 0 for r in meta['attempts']):
+            raise SystemExit('Complete the natural pilot before the optional local MCP validation')
+        result = probe(work)
+        if not result['success']:
+            raise SystemExit('Local MCP validation failed; inspect temporary probe-result.json')
+        meta['mcp_smoke'] = result
+        meta['pilot_valid'] = True
+        meta['pilot_validation_method'] = 'natural pilot plus deterministic MCP smoke'
+        note = ('Natural pilot did not demonstrate a reading call; a deterministic localhost Responses fixture '
+                'executed the real readscout MCP with a verified quote. Synthetic agent usage is excluded. '
+                'This is a validation deviation, not an extra measured task or a repeated cell.')
+        meta['deviations'].append(note)
+        with (OUT / 'PROTOCOL.md').open('a', encoding='utf-8') as f:
+            f.write('\n## Deviation: local MCP validation\n\n' + note + '\n')
+        write_json(work / 'meta.json', meta)
+        write_json(OUT / 'results.json', meta)
+        print('MCP validated without online agent quota. Commit the appended protocol deviation before continuing.')
     elif args.action in ('pilot', 'remaining', 'controls'):
         if args.action != 'pilot' and not json.loads((state() / 'meta.json').read_text()).get('pilot_valid'):
             raise SystemExit('Pilot must pass before further sessions')

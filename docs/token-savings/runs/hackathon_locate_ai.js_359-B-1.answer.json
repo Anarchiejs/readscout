@@ -1,0 +1,1 @@
+{"findings":[{"path":"controllers/ai.js","line":359,"quote":"exports.getRag = async (req, res) => {","answer":"The getRag handler loads ingested filenames and renders the RAG dashboard with question and result fields, including the documented boilerplate diagram."}]}

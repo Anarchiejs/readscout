@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" role="img" aria-label="Paired token totals">
+<rect width="100%" height="100%" fill="white"/>
+<text x="20" y="25" font-family="sans-serif" font-size="20">Codex reported total tokens: A (blue), B (orange)</text>
+<text x="10" y="65" font-family="sans-serif" font-size="12">boilerplate:routes_without_auth</text>
+<rect x="340" y="53" width="329.21" height="14" fill="#2563eb"/>
+<text x="674.21" y="65" font-size="11">57243</text>
+<rect x="340" y="69" width="318.30" height="14" fill="#ea580c"/>
+<text x="663.30" y="81" font-size="11">55346</text>
+<text x="10" y="109" font-family="sans-serif" font-size="12">hackathon:routes_auth</text>
+<rect x="340" y="97" width="231.00" height="14" fill="#2563eb"/>
+<text x="576.00" y="109" font-size="11">40167</text>
+<rect x="340" y="113" width="234.37" height="14" fill="#ea580c"/>
+<text x="579.37" y="125" font-size="11">40752</text>
+<text x="10" y="153" font-family="sans-serif" font-size="12">hackathon:locate:ai.js:359</text>
+<rect x="340" y="141" width="240.83" height="14" fill="#2563eb"/>
+<text x="585.83" y="153" font-size="11">41876</text>
+<rect x="340" y="157" width="235.65" height="14" fill="#ea580c"/>
+<text x="580.65" y="169" font-size="11">40975</text>
+<text x="10" y="197" font-family="sans-serif" font-size="12">logs:service-3000.log</text>
+<rect x="340" y="185" width="600.00" height="14" fill="#2563eb"/>
+<text x="945.00" y="197" font-size="11">104328</text>
+<rect x="340" y="201" width="562.40" height="14" fill="#ea580c"/>
+<text x="907.40" y="213" font-size="11">97790</text>
+<text x="10" y="241" font-family="sans-serif" font-size="12">hackathon:env_controllers</text>
+<rect x="340" y="229" width="367.10" height="14" fill="#2563eb"/>
+<text x="712.10" y="241" font-size="11">63831</text>
+<rect x="340" y="245" width="376.39" height="14" fill="#ea580c"/>
+<text x="721.39" y="257" font-size="11">65446</text>
+<text x="10" y="285" font-family="sans-serif" font-size="12">boilerplate:routes_all</text>
+<rect x="340" y="273" width="204.94" height="14" fill="#2563eb"/>
+<text x="549.94" y="285" font-size="11">35635</text>
+<rect x="340" y="289" width="206.59" height="14" fill="#ea580c"/>
+<text x="551.59" y="301" font-size="11">35921</text>
+<text x="10" y="329" font-family="sans-serif" font-size="12">nextjs:supabase_access</text>
+<rect x="340" y="317" width="286.42" height="14" fill="#2563eb"/>
+<text x="631.42" y="329" font-size="11">49802</text>
+<rect x="340" y="333" width="297.25" height="14" fill="#ea580c"/>
+<text x="642.25" y="345" font-size="11">51686</text>
+<text x="10" y="373" font-family="sans-serif" font-size="12">logs:service-9000.log</text>
+<rect x="340" y="361" width="598.24" height="14" fill="#2563eb"/>
+<text x="943.24" y="373" font-size="11">104022</text>
+<rect x="340" y="377" width="547.49" height="14" fill="#ea580c"/>
+<text x="892.49" y="389" font-size="11">95198</text>
+<text x="10" y="417" font-family="sans-serif" font-size="12">hackathon:locate:ai-agent.js:263</text>
+<rect x="340" y="405" width="243.56" height="14" fill="#2563eb"/>
+<text x="588.56" y="417" font-size="11">42351</text>
+<rect x="340" y="421" width="241.20" height="14" fill="#ea580c"/>
+<text x="586.20" y="433" font-size="11">41939</text>
+<text x="10" y="461" font-family="sans-serif" font-size="12">hackathon:post_without_auth</text>
+<rect x="340" y="449" width="361.81" height="14" fill="#2563eb"/>
+<text x="706.81" y="461" font-size="11">62912</text>
+<rect x="340" y="465" width="364.61" height="14" fill="#ea580c"/>
+<text x="709.61" y="477" font-size="11">63399</text>
+<text x="10" y="505" font-family="sans-serif" font-size="12">hackathon:routes_limited</text>
+<rect x="340" y="493" width="352.34" height="14" fill="#2563eb"/>
+<text x="697.34" y="505" font-size="11">61265</text>
+<rect x="340" y="509" width="234.08" height="14" fill="#ea580c"/>
+<text x="579.08" y="521" font-size="11">40701</text>
+<text x="10" y="549" font-family="sans-serif" font-size="12">logs:service-800.log</text>
+<rect x="340" y="537" width="297.20" height="14" fill="#2563eb"/>
+<text x="642.20" y="549" font-size="11">51677</text>
+<rect x="340" y="553" width="377.56" height="14" fill="#ea580c"/>
+<text x="722.56" y="565" font-size="11">65651</text>
+<text x="10" y="593" font-family="sans-serif" font-size="12">fastapi:public_endpoints</text>
+<rect x="340" y="581" width="290.13" height="14" fill="#2563eb"/>
+<text x="635.13" y="593" font-size="11">50447</text>
+<rect x="340" y="597" width="518.47" height="14" fill="#ea580c"/>
+<text x="863.47" y="609" font-size="11">90152</text>
+<text x="10" y="637" font-family="sans-serif" font-size="12">boilerplate:env_schema</text>
+<rect x="340" y="625" width="174.94" height="14" fill="#2563eb"/>
+<text x="519.94" y="637" font-size="11">30418</text>
+<rect x="340" y="641" width="176.64" height="14" fill="#ea580c"/>
+<text x="521.64" y="653" font-size="11">30714</text>
+<text x="10" y="681" font-family="sans-serif" font-size="12">fastapi:endpoints_all</text>
+<rect x="340" y="669" width="290.82" height="14" fill="#2563eb"/>
+<text x="635.82" y="681" font-size="11">50568</text>
+<rect x="340" y="685" width="289.29" height="14" fill="#ea580c"/>
+<text x="634.29" y="697" font-size="11">50302</text>
+</svg>

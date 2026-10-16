@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add an isolated, preregistered Codex token-savings experiment with raw evidence,
+  blind source-verified grading, generated charts and reports. See [the results](docs/TOKEN-SAVINGS.md):
+  enabling readscout does not establish a general token saving in this campaign.
+
 ## 0.1.6
 
 - **Models re-measured (2026-10-15)** with the current scoring and chunk size: `gemma4:12b` 0.94, `gemma4:26b` 0.93,

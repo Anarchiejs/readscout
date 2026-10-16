@@ -1,5 +1,13 @@
 # readscout (français)
 
+<!-- token-savings:start -->
+
+### Économies de tokens mesurées
+
+Sur 15 tâches Codex, A utilise 846,542 tokens et B, avec readscout, 865,972, soit 2.3% en plus. Readscout est appelé sur 4 tâches ; une exécution par cas sur une seule machine ne démontre pas une économie générale. [Report](docs/TOKEN-SAVINGS.md).
+
+<!-- token-savings:end -->
+
 **Des modèles locaux lisent tes fichiers pour ton agent de code.** Quand Claude Code ou Codex a besoin d'informations
 dans de gros fichiers, un long journal ou un dossier entier, il demande à readscout au lieu de tout lire lui-même. Un
 petit modèle sur ta propre carte graphique lit les fichiers et répond en quelques lignes, et **chaque affirmation est

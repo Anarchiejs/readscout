@@ -1,5 +1,13 @@
 # readscout
 
+<!-- token-savings:start -->
+
+### Measured token savings
+
+Across 15 Codex tasks, A uses 846,542 tokens and B, with readscout enabled, uses 865,972: 2.3% more. Only 4 tasks call readscout; one run per case on one machine does not establish a general saving. [Report](docs/TOKEN-SAVINGS.md).
+
+<!-- token-savings:end -->
+
 [![CI](https://github.com/Anarchiejs/readscout/actions/workflows/ci.yml/badge.svg)](https://github.com/Anarchiejs/readscout/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
