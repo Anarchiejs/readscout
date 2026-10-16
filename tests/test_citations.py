@@ -75,3 +75,19 @@ def test_redact_still_masks_real_values():
                  'apiKey: "process.env.OPENAI_API_KEY_AAAA"', 'password: hunter2hunter2hunter2']:
         masked = redact(code)
         assert '[REDACTED]' in masked, code
+
+
+def test_redact_keeps_call_expressions_but_masks_quoted_values():
+    for code in ["JWT_SECRET: Joi.string().required().description('JWT secret key'),", 'password = get_password(user)',
+                 'SMTP_PASSWORD: Joi.string().description("password for email server"),', 'apiKey: createKey(options.seed)']:
+        assert redact(code) == code, code
+    assert '[REDACTED]' in redact('password = "Zx9!qL2mPw8Rt(x)"')
+
+
+def test_redact_keeps_code_references_and_the_closing_bracket():
+    for code in ['session=session, email=form_data.username, password=form_data.password)', 'UserUpdate(password=body.new_password)',
+                 'send(email=email, token=password_reset_token)']:
+        assert redact(code) == code, code
+    assert redact('connect(password=abc123def456ghi)') == 'connect(password=[REDACTED])'
+    assert redact('passphrase: correcthorsebattery') == 'passphrase: [REDACTED]'
+    assert redact('api_key = "k9f3a8b7c6d5e4f3"; run()') == 'api_key = "[REDACTED]"; run()'

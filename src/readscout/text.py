@@ -19,10 +19,14 @@ ASSIGNED_SECRET = re.compile(r'(?i)(\b[\w.-]*(?:api[_-]?key|access[_-]?key|accou
                              r'|password|passwd|passphrase|secret|token|private[_-]?key|credentials?|conn(?:ection)?[_-]?string)'
                              r'[\w-]*["\']?[ \t]*[:=][ \t]*["\']?)'
                              # An unquoted value that reads a secret from its source (process.env.X, os.environ[...]) is code, not the
-                             # secret: masking it hides which variable the code uses. Quoted values are always masked.
+                             # secret: masking it hides which variable the code uses. A call expression (Joi.string().required(), get_password(...)) is code too.
+                             # Quoted values are always masked.
                              r'(?:(?<=["\'])|(?!(?:process\.env\.|import\.meta\.env\.|os\.environ|os\.getenv|getenv\(|env\.|env\(|Deno\.env'
-                             r'|System\.getenv|ENV\[|\$\{|\{\{|config\.|settings\.|self\.|this\.)))'
-                             r'[^\s"\',}]{12,}')     # never across a line break
+                             r'|System\.getenv|ENV\[|\$\{|\{\{|config\.|settings\.|self\.|this\.|[A-Za-z_$][\w$.]*\('
+                             # a dotted path (form_data.password) or a snake_case name (password_reset_token): letters and underscores only.
+                             # A real secret has digits or no structure; masking these also swallowed the closing parenthesis and broke the code.
+                             r'|[A-Za-z_]+(?:\.[A-Za-z_]+)+(?![\w$.-])|[a-z]+(?:_[a-z]+)+(?![\w$.-]))))'
+                             r'[^\s"\',}]{12,}?(?=[)\];]*(?:[\s"\',}]|$))')     # never across a line break; closing brackets stay outside the mask
 # The password part of user:password@host in URLs (database DSNs, git remotes), and HTTP authorization headers
 # (a credential has digits; "Basic configuration" in prose does not).
 URL_PASSWORD = re.compile(r'(\b[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@/]{3,}(@)', re.I)
