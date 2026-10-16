@@ -169,6 +169,76 @@ def state():
     return Path(json.loads(POINTER.read_text())['work'])
 
 
+ISOLATED_FLAGS = ['--no-daemon', '--disable', 'apps', '--disable', 'plugins', '--disable', 'remote_plugin',
+                  '-c', 'windows.sandbox="unelevated"']
+
+
+def isolate_skills(work):
+    """Windows Codex uses the OS profile for global skills even with fake HOME."""
+    env = environment(work, 'A', work / 'diagnostic')
+    probe = command(['codex', *ISOLATED_FLAGS, 'debug', 'prompt-input'], env)
+    if probe.returncode:
+        raise RuntimeError('Cannot inspect prompt isolation')
+    entries = json.loads(probe.stdout)
+    text = '\n'.join(c.get('text', '') for x in entries for c in x.get('content', []))
+    roots = dict(re.findall(r'- `(r\d+)` = `([^`]+)`', text))
+    current = tomllib.loads((work / 'A/.codex/config.toml').read_text(encoding='utf-8'))
+    disabled = [s['path'] for s in current.get('skills', {}).get('config', []) if not s.get('enabled', True)]
+    for alias, tail in re.findall(r'\(file: (r\d+)/([^\)]+)\)', text):
+        path = (Path(roots[alias]) / tail).as_posix()
+        if not Path(path).is_relative_to(work):
+            if path not in disabled:
+                disabled.append(path)
+    for config in ('A', 'B'):
+        cfg = work / config / '.codex/config.toml'
+        text = cfg.read_text(encoding='utf-8').split('[[skills.config]]')[0]
+        for path in disabled:
+            text += '\n[[skills.config]]\npath = ' + json.dumps(path) + '\nenabled = false\n'
+        cfg.write_text(text, encoding='utf-8')
+    target = work / 'B/.codex/skills/readscout/SKILL.md'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(work / 'B/.agents/skills/readscout/SKILL.md', target)
+    audit = {}
+    for config in ('A', 'B'):
+        env = environment(work, config, work / 'diagnostic')
+        probe = command(['codex', *ISOLATED_FLAGS, 'debug', 'prompt-input'], env)
+        if probe.returncode:
+            raise RuntimeError('Cannot validate isolated prompt')
+        present = '- readscout:' in probe.stdout
+        global_skills = (Path.home() / '.agents/skills').as_posix() in probe.stdout.replace('\\\\', '/')
+        if present != (config == 'B') or global_skills:
+            raise RuntimeError('Global skill leakage or missing B skill')
+        audit[config] = {'readscout_skill': present, 'real_global_skill_root': global_skills,
+                         'prompt_sha256': hashlib.sha256(probe.stdout.encode()).hexdigest()}
+    return audit
+
+
+def sandbox_probe(work):
+    """Grant sandbox-readable ACLs only to public corpus and skill copies, never auth."""
+    if sys.platform != 'win32':
+        return {'status': 'not measured', 'reason': 'Windows-only preflight'}
+    allowed = [work / 'corpus-state', work / 'B/.codex/skills', work / 'schema.json']
+    for path in allowed:
+        if path.exists():
+            grant = '*S-1-1-0:(RX)' if path.is_file() else '*S-1-1-0:(OI)(CI)(RX)'
+            p = command(['icacls', str(path), '/grant', grant, '/T', '/Q'])
+            if p.returncode:
+                raise RuntimeError('Failed temporary public corpus read ACL setup')
+    env = environment(work, 'A', work / 'diagnostic')
+    # A separate non-sensitive probe directory avoids granting access to fake homes.
+    probe_dir = work / 'sandbox-probe'
+    probe_dir.mkdir(exist_ok=True)
+    (probe_dir / 'read.txt').write_text('READ_OK', encoding='ascii')
+    command(['icacls', str(probe_dir), '/grant', '*S-1-1-0:(OI)(CI)(RX)', '/T', '/Q'])
+    base = ['codex', *ISOLATED_FLAGS, 'sandbox', '-P', ':read-only', '-C', str(probe_dir), '--', 'cmd.exe', '/d', '/c']
+    read = command([*base, 'type read.txt'], env)
+    write = command([*base, 'echo forbidden > write.txt'], env)
+    if read.returncode or read.stdout.strip() != 'READ_OK' or not write.returncode or (probe_dir / 'write.txt').exists():
+        raise RuntimeError('Read-only sandbox preflight failed')
+    return {'read_exit': read.returncode, 'read_output': read.stdout.strip(),
+            'write_exit': write.returncode, 'write_created': False}
+
+
 def prepare():
     if POINTER.exists():
         raise SystemExit('Existing workspace: do not overwrite it')
@@ -201,11 +271,14 @@ def prepare():
     env = environment(work, 'B', work / 'doctor')
     installed = command([sys.executable, '-m', 'readscout.cli', 'install-agent', 'codex'], env)
     meta['install'] = scrub(installed.stdout + installed.stderr)
+    meta['isolation_audit'] = isolate_skills(work)
     doctor = command([sys.executable, '-m', 'readscout.cli', 'doctor'], env)
     meta['doctor'] = scrub(doctor.stdout + doctor.stderr)
     meta['doctor_ok'] = doctor.returncode == 0 and 'All good.' in doctor.stdout
     write_json(work / 'meta.json', meta)
     write_json(work / 'schema.json', SCHEMA)
+    meta['sandbox_probe'] = sandbox_probe(work)
+    write_json(work / 'meta.json', meta)
     write_json(OUT / 'results.json', meta)
     protocol(meta)
     print(json.dumps({'tasks': selected, 'doctor': meta['doctor'], 'install': meta['install']}, indent=2))
@@ -308,7 +381,7 @@ def run_one(work, meta, task, config, attempt=1):
         text += '\n[mcp_servers.readscout.env]\nREADSCOUT_HOME = ' + json.dumps(metrics.as_posix()) + '\n'
         cfg.write_text(text, encoding='utf-8')
     final = work / f'{slug}.json'
-    args = ['codex', 'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
+    args = ['codex', *ISOLATED_FLAGS, 'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
             '-c', 'approval_policy="never"', '-m', meta['model'], '-c',
             'model_reasoning_effort=' + json.dumps(meta['effort']), '-C', str(task.root if task else work),
             '-o', str(final)]
@@ -325,7 +398,7 @@ def run_one(work, meta, task, config, attempt=1):
     raw = work / f'{slug}.events.jsonl'
     err = work / f'{slug}.stderr.txt'
     with raw.open('wb') as stdout_file, err.open('wb') as stderr_file:
-        proc = subprocess.Popen(args, env=env, stdout=stdout_file, stderr=stderr_file,
+        proc = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=stdout_file, stderr=stderr_file,
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         try:
             exit_code = proc.wait(timeout=1200)
@@ -369,6 +442,9 @@ def run(phase):
     meta = json.loads((work / 'meta.json').read_text())
     if not meta['doctor_ok']:
         raise SystemExit('Doctor did not pass; campaign blocked')
+    for path, expected in meta['source_hashes'].items():
+        if hashlib.sha256((ROOT / path).read_bytes()).hexdigest() != expected:
+            raise SystemExit('Code under test changed: campaign frozen')
     if command(['git', 'status', '--porcelain', '--', 'docs/token-savings/PROTOCOL.md', 'scripts/token_savings.py']).stdout:
         raise SystemExit('Commit protocol and harness before measured runs')
     os.environ['READSCOUT_HOME'] = str(work / 'corpus-state')
