@@ -381,7 +381,7 @@ def run_one(work, meta, task, config, attempt=1):
         text += '\n[mcp_servers.readscout.env]\nREADSCOUT_HOME = ' + json.dumps(metrics.as_posix()) + '\n'
         cfg.write_text(text, encoding='utf-8')
     final = work / f'{slug}.json'
-    args = ['codex', *ISOLATED_FLAGS, 'exec', '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
+    args = ['codex', '--no-daemon', 'exec', *ISOLATED_FLAGS[1:], '--json', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only',
             '-c', 'approval_policy="never"', '-m', meta['model'], '-c',
             'model_reasoning_effort=' + json.dumps(meta['effort']), '-C', str(task.root if task else work),
             '-o', str(final)]
