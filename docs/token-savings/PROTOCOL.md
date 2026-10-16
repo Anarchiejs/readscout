@@ -330,3 +330,7 @@ A second pilot was discarded after local deterministic HTTP mock diagnostics dem
 ## Telemetry validation: deterministic local transport
 
 A localhost Responses mock, with no real credentials and no model quota, sent two responses, each with input_tokens=100, cached_tokens=25, output_tokens=50 and reasoning_tokens=10. The CLI reported input_tokens=200, cached_input_tokens=50, output_tokens=100 and reasoning_output_tokens=20. Thus the CLI preserves upstream total input/output counters and reports cached/reasoning components separately; neither component is added again to primary total. The mock verifies parser/accounting behavior, not provider billing. The diagnostic values will be stored in results.json and excluded from campaign aggregates.
+
+## Deviation: validate MCP without biasing natural tool choice
+
+The corrected natural pilot completed all four cells with successful source reads and no MCP calls: the agent chose grep for both B tasks. Rather than bias the task prompt or repeat cells, MCP executability was validated separately with a deterministic localhost Responses stream requesting local_ask. The real readscout MCP returned a verified quote, and its fresh metrics.jsonl was found. This replaces the natural-pilot MCP-call gate, with no online agent quota, and is recorded as a validation deviation. The reading skill and task prompts remain unchanged. Synthetic diagnostic usage is excluded from measured results. The smoke model was unloaded before campaign continuation.
