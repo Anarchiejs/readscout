@@ -26,3 +26,6 @@ build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local improvement plans, experiments and raw results (not published yet)
+/.improvements/

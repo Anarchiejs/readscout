@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-- Preregister token-savings campaign 2 and publish its stopped pilot, structural coverage and separate scorer results.
-
-- Add an isolated, preregistered Codex token-savings experiment with raw evidence,
-  blind source-verified grading, generated charts and reports. See [the results](docs/TOKEN-SAVINGS.md):
-  enabling readscout does not establish a general token saving in this campaign.
 - Clarify the CLI/dashboard local-text estimate after the campaign. It is not measured agent savings;
   the estimate formula and delegation rules are unchanged, and all recorded runs predate this wording change.
 

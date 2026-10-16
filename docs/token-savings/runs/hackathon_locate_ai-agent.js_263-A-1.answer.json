@@ -1,1 +1,0 @@
-{"findings":[{"path":"controllers/ai-agent.js","line":265,"quote":"  const threadId = req.user ? req.user._id.toString() : `${TEMP_SESSION_PREFIX}${req.sessionID}`;","answer":"getAIAgent selects the user ID or temp session ID, then loads prior messages from the MongoDB checkpoint using checkpointer.getTuple."}]}

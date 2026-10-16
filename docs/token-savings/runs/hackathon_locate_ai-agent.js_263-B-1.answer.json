@@ -1,1 +1,0 @@
-{"findings":[{"path":"controllers/ai-agent.js","line":263,"quote":"exports.getAIAgent = async (req, res) => {","answer":"getAIAgent loads prior messages from MongoDB checkpoints using the authenticated user’s ID or temp_{sessionID} for unauthenticated users."}]}
