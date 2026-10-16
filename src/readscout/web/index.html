@@ -57,7 +57,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;
 <section id="usage" style="display:none">
   <div class="grid" id="cards" style="margin-top:16px"></div>
   <h2>Recent calls</h2><div class="card scroll"><table id="recent"></table></div>
-  <p class="mut" style="font-size:12px">Tokens kept out of your agent's context = (bytes read locally minus characters returned) / 3.5: an estimate.</p>
+  <p class="mut" style="font-size:12px">Local text reduction (token estimate) = max(0, (bytes read locally minus characters returned) / 3.5). Not measured agent savings: grep choices and tool overhead are not included.</p>
 </section>
 <div id="msg"></div>
 </main>
@@ -109,7 +109,7 @@ function render(){
     [a.claude_wired||(a.codex_mcp&&a.codex_skill),'at least one agent connected']];
   $('check').innerHTML=chk.map(([g,t])=>`<div><span class="${g?'ok':'bad'}">${g?'&#10003;':'&#10007;'}</span> ${esc(t)}</div>`).join('')+(chk.every(c=>c[0])?'<p class="ok"><b>Ready.</b> Restart your agent and work as usual; it will delegate large reads by itself.</p>':'');
   const s=S.stats;
-  $('cards').innerHTML=[['Calls (30 days)',fmt(s.calls)],['Tokens kept out (est.)',fmt(s.tokens_avoided_est)],['Read locally',fmt(s.kb_read_locally)+' KB'],['Returned to agent',fmt(s.kb_returned)+' KB'],
+  $('cards').innerHTML=[['Calls (30 days)',fmt(s.calls)],['Local text reduction (est.)',fmt(s.tokens_avoided_est)],['Read locally',fmt(s.kb_read_locally)+' KB'],['Returned to agent',fmt(s.kb_returned)+' KB'],
     ['Verified / dropped',s.verified+' / '+s.dropped],['Edits applied',s.edits_applied+' / '+s.edits],['Empty answers',s.empty_answers],['Local compute',fmt(s.seconds_local)+' s']]
     .map(([k,v])=>`<div class="card"><div class="mut">${k}</div><div class="big">${v}</div></div>`).join('');
   $('recent').innerHTML='<tr><th>When</th><th>Tool</th><th>Model</th><th>Read</th><th>Verified / status</th><th>Dropped</th><th>Time</th></tr>'+(s.recent.map(r=>`<tr><td>${new Date(r.time*1000).toLocaleString()}</td><td>${esc(r.tool)}${r.mode&&r.mode!=='find'?' ('+esc(r.mode)+')':''}</td><td>${esc(r.model)}</td><td>${r.bytes_read?fmt(Math.round(r.bytes_read/1000))+' KB':''}</td><td>${esc(r.verified??r.status??'')}</td><td>${r.dropped??''}</td><td>${r.seconds??''} s</td></tr>`).join('')||'<tr><td colspan="7" class="mut">No call yet.</td></tr>');

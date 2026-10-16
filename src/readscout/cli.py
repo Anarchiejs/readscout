@@ -99,7 +99,8 @@ def doctor_ollama(cfg, line, tiers):
 def print_stats(days):
     s = stats.summary(days)
     print(f"{s['calls']} call(s) in {days} days: {s['reads']} read(s), {s['edits']} edit(s), {s['edits_applied']} applied")
-    print(f"{s['kb_read_locally']} KB read locally, {s['kb_returned']} KB returned -> about {s['tokens_avoided_est']:,} tokens kept out of your agent's context")
+    print(f"{s['kb_read_locally']} KB read locally, {s['kb_returned']} KB returned -> about {s['tokens_avoided_est']:,} token-equivalent local text reduction")
+    print('Estimate only, not measured agent savings: grep choices and tool overhead are not included.')
     print(f"verified findings {s['verified']}, dropped {s['dropped']}; empty answers {s['empty_answers']}; {s['seconds_local']} s of local compute")
     for m, v in s['by_model'].items():
         print(f"  {m:22} {v['calls']} call(s), {v['seconds']:.0f} s")

@@ -556,11 +556,13 @@ def grade():
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(scrub(p.read_text(encoding='utf-8', errors='replace')), encoding='utf-8')
     meta['raw_bytes'] = sum(p.stat().st_size for p in (OUT / 'runs').rglob('*') if p.is_file())
-    meta['postprocessing'] = ('After all measured sessions, narrowed evidence redaction to preserve public '
-                             'source expressions and JSON escaping. Restored retained and discarded streams '
-                             'from private originals; all usage counters and blind F1 scores remained identical.')
-    meta['cpu_name'] = command(['powershell.exe', '-NoProfile', '-Command',
-                               '(Get-CimInstance Win32_Processor).Name']).stdout.strip() if sys.platform == 'win32' else meta['cpu']
+    if not temporary:
+        meta['postprocessing'] = ('After all measured sessions, narrowed evidence redaction to preserve public '
+                                 'source expressions and JSON escaping. Restored retained and discarded streams '
+                                 'from private originals; all usage counters and blind F1 scores remained identical.')
+    if not meta.get('cpu_name'):
+        meta['cpu_name'] = command(['powershell.exe', '-NoProfile', '-Command',
+                                   '(Get-CimInstance Win32_Processor).Name']).stdout.strip() if sys.platform == 'win32' else meta['cpu']
     write_json(OUT / 'results.json', json.loads(scrub(json.dumps(meta))))
     if temporary:
         if work.parent.resolve() != Path(tempfile.gettempdir()).resolve() or not work.name.startswith('readscout-token-grading-'):
@@ -794,6 +796,8 @@ def report():
     lines += meta['deviations'] or ['No deviations recorded.']
     if meta.get('postprocessing'):
         lines.append(meta['postprocessing'])
+    if meta.get('postcampaign_changes'):
+        lines.append(meta['postcampaign_changes'])
     discarded = meta.get('discarded_attempts', [])
     if discarded:
         measured = [r for r in discarded if r.get('usage') and total(r) is not None]
@@ -852,8 +856,10 @@ def report():
             delta = abs(overall['saving'])
             direction_fr = 'en moins' if overall['saving'] >= 0 else 'en plus'
             direction_en = 'fewer' if overall['saving'] >= 0 else 'more'
-            paragraph = (f"Sur {len(paired)} tâches Codex, A utilise {overall['A']:,} tokens et B, avec readscout, "
-                         f"{overall['B']:,}, soit {delta:.1%} {direction_fr}. "
+            fr_a, fr_b = (f'{overall[c]:,}'.replace(',', ' ') for c in 'AB')
+            fr_delta = f'{delta*100:.1f}'.replace('.', ',')
+            paragraph = (f"Sur {len(paired)} tâches Codex, A utilise {fr_a} tokens et B, avec readscout, "
+                         f"{fr_b}, soit {fr_delta} % {direction_fr}. "
                          f"Readscout est appelé sur {len(delegated)} tâches ; une exécution par cas sur une seule machine "
                          'ne démontre pas une économie générale.' if french else
                          f"Across {len(paired)} Codex tasks, A uses {overall['A']:,} tokens and B, with readscout enabled, "
@@ -862,7 +868,8 @@ def report():
         else:
             paragraph = ('La mesure des économies de tokens reste incomplète : aucune économie globale vérifiée à annoncer.' if french else
                          'The token-savings experiment is incomplete: no verified overall savings to claim.')
-        block = start + '\n\n' + ('### Économies de tokens mesurées' if french else '### Measured token savings') + '\n\n' + paragraph + ' [Report](docs/TOKEN-SAVINGS.md).\n\n' + end
+        report_label = 'Rapport' if french else 'Report'
+        block = start + '\n\n' + ('### Économies de tokens mesurées' if french else '### Measured token savings') + '\n\n' + paragraph + f' [{report_label}](docs/TOKEN-SAVINGS.md).\n\n' + end
         if start in content:
             content = content[:content.index(start)] + block + content[content.index(end)+len(end):]
         else:

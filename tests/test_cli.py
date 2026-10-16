@@ -130,7 +130,9 @@ def test_task_commands_call_the_tools(monkeypatch, capsys):
 
 def test_stats(capsys):
     assert cli.main(['stats', '--days', '7']) == 0
-    assert '0 call(s) in 7 days' in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert '0 call(s) in 7 days' in output
+    assert 'not measured agent savings' in output
 
 
 def test_stop(monkeypatch, capsys):

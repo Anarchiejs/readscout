@@ -1,4 +1,4 @@
-"""Usage summary from metrics.jsonl: what was read locally instead of by the agent."""
+"""Local reading usage from metrics.jsonl; token equivalents are not measured agent savings."""
 import json
 import time
 
@@ -36,7 +36,7 @@ def summary(days=30) -> dict:
             'edits_applied': sum(r.get('status') == 'applied' for r in edits),
             'empty_answers': sum(r.get('verified', 0) == 0 for r in reads),
             'kb_read_locally': round(read_bytes / 1000), 'kb_returned': round(returned / 1000),
-            # ~3.5 characters per token for code and prose; an estimate, labelled as such everywhere.
+            # Gross local-text proxy at ~3.5 characters/token; not net savings against an agent using grep.
             'tokens_avoided_est': max(0, round((read_bytes - returned) / 3.5)),
             'verified': sum(r.get('verified', 0) for r in reads), 'dropped': sum(r.get('dropped', 0) for r in reads),
             'seconds_local': round(sum(r.get('seconds', 0) for r in rs)), 'by_model': by_model, 'recent': rs[-15:][::-1]}

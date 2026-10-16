@@ -6658,5 +6658,6 @@
     "fake_homes_deleted": true,
     "temporary_probe_scripts_deleted": true,
     "loaded_campaign_models": 0
-  }
+  },
+  "postcampaign_changes": "After all retained sessions and the measurement-data commit, CLI/dashboard and README labels were clarified to describe a local-text token equivalent rather than measured agent savings. Every recorded run predates this wording change. The estimate formula and delegation skill remain unchanged; the report data do not support a universal size threshold."
 }

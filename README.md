@@ -172,7 +172,8 @@ Restart Claude Code / Codex.
    - "Run the tests and tell me why they fail" (the agent saves the output to a file and digests it).
 4. **Watch the agent call `local_ask` or `local_digest`** and get a short receipt instead of opening every file.
    The first call loads the model into memory (10-30 s); later calls are faster.
-5. **See what it saved:** `readscout stats`, or `readscout dashboard` for the usage page.
+5. **Inspect local reading:** `readscout stats`, or `readscout dashboard` for the usage page.
+   The token-equivalent local text reduction is an estimate, not measured agent savings.
 
 You can also call the tools from a terminal, without any agent, to see what they return:
 ```sh

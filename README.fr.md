@@ -4,7 +4,7 @@
 
 ### Économies de tokens mesurées
 
-Sur 15 tâches Codex, A utilise 846,542 tokens et B, avec readscout, 865,972, soit 2.3% en plus. Readscout est appelé sur 4 tâches ; une exécution par cas sur une seule machine ne démontre pas une économie générale. [Report](docs/TOKEN-SAVINGS.md).
+Sur 15 tâches Codex, A utilise 846 542 tokens et B, avec readscout, 865 972, soit 2,3 % en plus. Readscout est appelé sur 4 tâches ; une exécution par cas sur une seule machine ne démontre pas une économie générale. [Rapport](docs/TOKEN-SAVINGS.md).
 
 <!-- token-savings:end -->
 
@@ -127,7 +127,8 @@ Redémarre Claude Code / Codex.
    - « Lance les tests et dis-moi pourquoi ils échouent » (l'agent enregistre la sortie dans un fichier et la digère).
 4. Tu vois l'agent appeler `local_ask` ou `local_digest` et recevoir un reçu court au lieu d'ouvrir chaque fichier.
    Le premier appel charge le modèle en mémoire (10 à 30 s), les suivants sont plus rapides.
-5. Ce que ça t'a fait économiser : `readscout stats`, ou `readscout dashboard` pour la page de suivi.
+5. Consulte les lectures locales : `readscout stats`, ou `readscout dashboard` pour la page de suivi.
+   La réduction de texte exprimée en tokens est une estimation, pas une économie mesurée chez l'agent.
 
 Tu peux aussi appeler les outils depuis un terminal pour voir ce qu'ils renvoient :
 `readscout ask src -q "Quelles fonctions lisent des variables d'environnement ?"` ou `readscout digest build.log`.
