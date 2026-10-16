@@ -326,3 +326,7 @@ Discarded the pilot after offline verification showed Windows Codex discovers OS
 ## Deviation: exec option placement
 
 A second pilot was discarded after local deterministic HTTP mock diagnostics demonstrated that this CLI does not apply the top-level -c Windows sandbox override when exec has its own overrides. With the backend override before exec, the identical mock Get-Content call was rejected; after exec, it returned READ_OK with exit zero. Mock traffic used a localhost provider and no real credentials or model quota. All session config overrides and feature switches now follow exec. A separate mock confirmed the successful command_execution event shape. Failed real pilot A usage and partial B metrics remain in discarded_attempts and runs/discarded-options. No saving is inferred from these invalid runs.
+
+## Telemetry validation: deterministic local transport
+
+A localhost Responses mock, with no real credentials and no model quota, sent two responses, each with input_tokens=100, cached_tokens=25, output_tokens=50 and reasoning_tokens=10. The CLI reported input_tokens=200, cached_input_tokens=50, output_tokens=100 and reasoning_output_tokens=20. Thus the CLI preserves upstream total input/output counters and reports cached/reasoning components separately; neither component is added again to primary total. The mock verifies parser/accounting behavior, not provider billing. The diagnostic values will be stored in results.json and excluded from campaign aggregates.
