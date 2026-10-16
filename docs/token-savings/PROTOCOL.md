@@ -318,3 +318,7 @@ Missing metrics are not measured, never zero-filled as measurements.
 ## Deviation: interrupted pilot
 
 Coordinator interrupted the first pilot before its buffered output was saved. No completed final answer or usage was recoverable. The pilot is discarded after a harness change that persists raw events immediately. The interrupted attempt is retained with missing telemetry, not treated as zero tokens. No other measured session had started.
+
+## Deviation: Windows isolation preflight
+
+Discarded the pilot after offline verification showed Windows Codex discovers OS-profile global skills despite fake HOME/USERPROFILE. A also rejected all shell reads because the Windows sandbox backend was unspecified. A completed with an empty answer; B was cancelled after diagnosis to avoid wasting quota. Both traces and available usage/metrics are retained as discarded data. The corrected harness disables discovered global skills only in temporary configs, copies the installed B skill to the fake CODEX_HOME skill directory, disables account apps/plugins identically, sets --no-daemon and windows.sandbox=unelevated, and verifies that public temporary corpus reads succeed while writes fail. Copied authentication remains private. The remaining campaign has not run.
