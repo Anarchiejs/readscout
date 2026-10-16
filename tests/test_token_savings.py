@@ -111,3 +111,103 @@ def test_read_calls_exclude_edits_and_other_servers():
     row = {'mcp_calls': {'readscout.local_ask': 2, 'readscout.local_digest': 1,
                          'readscout.local_edit': 3, 'codex.list_mcp_resources': 1}}
     assert harness.read_calls(row) == 3
+
+
+v2spec = importlib.util.spec_from_file_location('token_savings_v2', Path(__file__).parents[1] / 'scripts/token_savings_v2.py')
+assert v2spec and v2spec.loader
+v2 = importlib.util.module_from_spec(v2spec)
+v2spec.loader.exec_module(v2)
+
+
+def test_v2_accepts_variable_occurrence_elsewhere_in_scope(tmp_path):
+    (tmp_path / 'first.js').write_text('const a = process.env.TARGET_VALUE;\n')
+    (tmp_path / 'second.js').write_text('const b = process.env.TARGET_VALUE;\n')
+    task = Task('env', 'env_vars', 'easy', tmp_path, ['first.js', 'second.js'], 'find',
+                [{'path': 'first.js', 'line': 1, 'key': 'TARGET_VALUE'}])
+    answer = {'findings': [{'path': 'second.js', 'line': 1, 'quote': 'const b = process.env.TARGET_VALUE;', 'answer': 'TARGET_VALUE'}]}
+    assert v2.grade_v2(task, answer)['f1'] == 1
+    assert harness.grade_answer(task, answer)['f1'] == 0
+    answer['findings'][0]['path'] = 'outside.js'
+    assert v2.grade_v2(task, answer)['unverifiable'] == 1
+
+
+def test_v2_rejects_variable_claim_unsupported_by_quote(tmp_path):
+    (tmp_path / 'source.js').write_text('const a = process.env.OTHER_VALUE;\n')
+    task = Task('env', 'env_vars', 'easy', tmp_path, ['source.js'], 'find',
+                [{'path': 'source.js', 'line': 1, 'key': 'TARGET_VALUE'}])
+    answer = {'findings': [{'path': 'source.js', 'line': 1, 'quote': 'const a = process.env.OTHER_VALUE;', 'answer': 'TARGET_VALUE'}]}
+    assert v2.grade_v2(task, answer)['f1'] == 0
+
+
+def test_v2_semantic_ground_truth_rejects_wrong_method_and_operation(tmp_path):
+    (tmp_path / 'route.js').write_text('router.route("/items")\n  .get(handler);\n')
+    task = Task('routes', 'routes_list', 'easy', tmp_path, ['route.js'], 'find',
+                [{'path': 'route.js', 'line': 1, 'span': [1, 2], 'method': 'GET', 'route': '/items'}])
+    answer = {'findings': [{'path': 'route.js', 'line': 1, 'quote': 'router.route("/items")', 'answer': 'POST /items'}]}
+    assert v2.grade_v2(task, answer)['f1'] == 0
+    answer['findings'][0]['answer'] = 'GET /items'
+    assert v2.grade_v2(task, answer)['f1'] == 1
+    task.family = 'data_access'
+    task.gt = [{'path': 'route.js', 'line': 1, 'table': 'items', 'operation': 'upsert'}]
+    answer['findings'][0]['answer'] = 'items select'
+    assert v2.grade_v2(task, answer)['f1'] == 0
+    answer['findings'][0]['answer'] = 'items upsert'
+    assert v2.grade_v2(task, answer)['f1'] == 1
+
+
+def test_v2_receipt_parser_preserves_quotes_and_trace_end():
+    text = ('[status: complete]\n- a.log:2 x3, last at line 7 | « ERROR  bad value »'
+            ' ... ends a.log:4 « ValueError: bad »\nNot recognized (1):\n- b.py:4 unknown')
+    result = v2.receipt_answer(text)['findings']
+    assert len(result) == 2
+    assert result[0]['quote'] == 'ERROR  bad value'
+    assert result[1]['line'] == 4
+
+
+def test_v2_instrumentation_distinguishes_targeted_and_broad_reads():
+    items = [
+        {'type': 'command_execution', 'command': 'Get-Content readscout/SKILL.md', 'aggregated_output': 'core'},
+        {'type': 'mcp_tool_call', 'server': 'readscout', 'tool': 'local_ask',
+         'result': {'content': [{'text': '[status: complete]\n- src/a.py:20 | « source quote »'}]}},
+        {'type': 'command_execution', 'command': "sed -n '20,22p' src/a.py", 'aggregated_output': 'abc'},
+        {'type': 'command_execution', 'command': 'rg ERROR .', 'aggregated_output': 'abcdef'},
+    ]
+    raw = '\n'.join(json.dumps({'type': 'item.completed', 'item': i}) for i in items)
+    result = v2.instrument(raw)
+    assert result['skill_core']
+    assert result['readscout_calls'] == 1
+    assert [r['mode'] for r in result['rereads']] == ['targeted', 'broad']
+    assert result['fallbacks'] == 1
+    assert result['receipts'][0]['status'] == 'complete'
+    assert result['request_usage'] is None
+    assert result['phase_tokens'] is None
+
+
+def test_v2_empty_pairs_are_not_zero_saving():
+    assert v2.aggregate([]) is None
+
+
+def test_v2_cleanup_refuses_non_campaign_directory(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match='Unsafe cleanup'):
+        v2.safe_delete(tmp_path)
+
+
+def test_v2_quota_gate_stops_before_refreshed_allowance_or_exhaustion():
+    budget = {'primary_stop_used_percent': 97.9, 'secondary_stop_used_percent': 92.8}
+    assert v2.quota_stop(budget, 79, 28, 1000, 500) is None
+    assert v2.quota_stop(budget, 97.9, 28, 1000, 500)
+    assert v2.quota_stop(budget, 79, 92.8, 1000, 500)
+    assert v2.quota_stop(budget, 1, 28, 1000, 1000)
+
+
+def test_v2_skill_copy_includes_all_references(tmp_path):
+    # Exercise the harness copying path rather than merely checking the package installer.
+    import shutil
+    src = tmp_path / 'B/.agents/skills/readscout'
+    (src / 'references').mkdir(parents=True)
+    (src / 'SKILL.md').write_text('core')
+    (src / 'references/troubleshooting.md').write_text('details')
+    dest = tmp_path / 'B/.codex/skills/readscout'
+    shutil.copytree(src, dest, dirs_exist_ok=True)
+    assert (dest / 'references/troubleshooting.md').read_text() == 'details'

@@ -206,7 +206,7 @@ def isolate_skills(work):
         cfg.write_text(text, encoding='utf-8')
     target = work / 'B/.codex/skills/readscout/SKILL.md'
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(work / 'B/.agents/skills/readscout/SKILL.md', target)
+    shutil.copytree(work / 'B/.agents/skills/readscout', target.parent, dirs_exist_ok=True)
     audit = {}
     for config in ('A', 'B'):
         env = environment(work, config, work / 'diagnostic')
@@ -444,7 +444,13 @@ def run_one(work, meta, task, config, attempt=1):
         # Stop only if models were not resident before this session.
         from readscout import backend
         existing = meta.get('preexisting_models', [])
-        if not existing:
+        if meta.get('campaign') == 2:
+            used = {r.get('model') for r in row['metrics']} - set(existing) - {None, 'deterministic'}
+            for name in used:
+                backend.unload(name, 'http://127.0.0.1:11434')
+            row['stop'] = 'Unloaded only campaign-used model names; preserved other processes.'
+            row['models_remaining'] = backend.loaded_models('http://127.0.0.1:11434')
+        elif not existing:
             row['stop'] = command([sys.executable, '-m', 'readscout.cli', 'stop'], env).stdout
         else:
             for name in {r.get('model') for r in row['metrics']} - set(existing) - {None}:
@@ -880,6 +886,10 @@ def report():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'v2':
+        from token_savings_v2 import main as campaign_two
+        campaign_two(sys.argv[2:])
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'pilot', 'validate-mcp', 'remaining', 'controls', 'grade', 'report', 'cleanup'])
     args = parser.parse_args()
