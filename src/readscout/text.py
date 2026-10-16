@@ -17,7 +17,12 @@ SECRET = re.compile(r'-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?
 # authToken, AccountKey). Values of 12 characters or more: shorter ones are code identifiers far more often.
 ASSIGNED_SECRET = re.compile(r'(?i)(\b[\w.-]*(?:api[_-]?key|access[_-]?key|account[_-]?key|signing[_-]?key|encryption[_-]?key'
                              r'|password|passwd|passphrase|secret|token|private[_-]?key|credentials?|conn(?:ection)?[_-]?string)'
-                             r'[\w-]*["\']?[ \t]*[:=][ \t]*["\']?)[^\s"\',}]{12,}')     # never across a line break
+                             r'[\w-]*["\']?[ \t]*[:=][ \t]*["\']?)'
+                             # An unquoted value that reads a secret from its source (process.env.X, os.environ[...]) is code, not the
+                             # secret: masking it hides which variable the code uses. Quoted values are always masked.
+                             r'(?:(?<=["\'])|(?!(?:process\.env\.|import\.meta\.env\.|os\.environ|os\.getenv|getenv\(|env\.|env\(|Deno\.env'
+                             r'|System\.getenv|ENV\[|\$\{|\{\{|config\.|settings\.|self\.|this\.)))'
+                             r'[^\s"\',}]{12,}')     # never across a line break
 # The password part of user:password@host in URLs (database DSNs, git remotes), and HTTP authorization headers
 # (a credential has digits; "Basic configuration" in prose does not).
 URL_PASSWORD = re.compile(r'(\b[a-z][a-z0-9+.-]*://[^\s:/@]+:)[^\s@/]{3,}(@)', re.I)
@@ -166,9 +171,32 @@ def _runs(lines: list[Line]) -> dict[tuple[str, int], list[Line]]:
     return runs
 
 
+def _quote_parts(quote: str) -> list[str]:
+    return [_NUM_PREFIX.sub('', part) for part in quote.strip().strip('"«»“”`').splitlines()]
+
+
+def exact_text(quote: str, lines: list[Line], where: tuple[str, int, int]) -> tuple[str, str]:
+    """The text of the source at a located place, and how the model's quote matched it: 'exact' (a verbatim substring
+    of one line) or 'normalized' (only whitespace or line breaks differed). The returned text always comes from the
+    file, never from the model, so the receipt shows exactly what was verified."""
+    path, first, last = where
+    span = [ln for ln in lines if ln.path == path and first <= ln.no <= last]
+    parts = _quote_parts(quote)
+    if len(span) == 1:
+        raw = span[0].text
+        # The model may wrap a quote in quotation marks; try the quote as given first, since they can be real code.
+        for verbatim in (quote.strip(), '\n'.join(parts).strip()):
+            if verbatim and verbatim in raw:
+                return verbatim, 'exact'
+        words = _norm('\n'.join(parts)).split(' ')
+        hit = re.search(r'\s+'.join(re.escape(w) for w in words), raw) if words != [''] else None
+        return (hit.group(0), 'normalized') if hit else (raw.strip(), 'normalized')
+    return ' '.join(ln.text.strip() for ln in span), 'normalized'
+
+
 def locate_all(quote: str, lines: list[Line]) -> list[tuple[str, int, int]]:
     """Every place a quote appears verbatim (modulo whitespace), as (path, first_line, last_line), in file order."""
-    parts = [_NUM_PREFIX.sub('', part) for part in quote.strip().strip('"«»“”`').splitlines()]
+    parts = _quote_parts(quote)
     q = _norm('\n'.join(parts))
     if len(q) < 4:
         return []
@@ -203,7 +231,12 @@ def locate_all(quote: str, lines: list[Line]) -> list[tuple[str, int, int]]:
     return []
 
 
-def locate(quote: str, lines: list[Line], hint: int = 0, used: set | None = None) -> tuple[str, int, int] | None:
+def _same_file(given: str, path: str) -> bool:
+    given = given.strip().replace('\\', '/')
+    return bool(given) and (given == path or path.endswith('/' + given) or given.endswith('/' + path))
+
+
+def locate(quote: str, lines: list[Line], hint: int = 0, used: set | None = None, file: str = '') -> tuple[str, int, int] | None:
     """Where a quote is in the source; None if it is not there (the anti-hallucination gate).
 
     Line numbers always come from here. When the same text appears several times (identical lines are common:
@@ -213,6 +246,9 @@ def locate(quote: str, lines: list[Line], hint: int = 0, used: set | None = None
     occurrences = locate_all(quote, lines)
     if not occurrences:
         return None
+    # The file the model named picks among identical quotes; an unknown or wrong name never rejects a verified quote.
+    named = [o for o in occurrences if _same_file(file, o[0])]
+    occurrences = named or occurrences
     free = [o for o in occurrences if not used or o not in used] or occurrences
     if hint:
         return min(free, key=lambda o: abs(o[1] - hint))
