@@ -19,7 +19,7 @@ Local models read, you decide. Send **paths** and a **question**, never file con
 | Facts over files or folders | `local_ask(paths, question)` |
 | Overview of a module | `local_ask(paths, question, mode="summary")` |
 | Long log or command output | save it to a file, then `local_digest(path)` |
-| Env variables, routes, Python endpoints, Supabase accesses | `local_ask(paths, question, extract="env")` (or `routes`, `endpoints`, `supabase`): exact, no model; `"endpoints!X"` lists those that never mention X |
+| Env variables, routes, Python endpoints, Supabase accesses | `local_ask(paths, question, extract="env")` (or `routes`, `endpoints`, `supabase`): exact, no model, lists every item (you filter); `"endpoints!A,B"` = endpoints mentioning neither A nor B (textual, not proof of public) |
 | Mechanical edit already decided | read `references/local_edit.md` first, then `local_edit` |
 
 Leave `quality` unset. Relative paths start at your working folder; folders are accepted (up to 1.5 MB).

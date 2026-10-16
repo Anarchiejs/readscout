@@ -178,6 +178,7 @@ REDUCE_SCHEMA = {'type': 'object', 'properties': {'summary': {'type': 'string'}}
 @dataclass
 class Outcome:
     verified: list = field(default_factory=list)   # (path, first, last, text, quote); quote is read from the source
+    status: str = ''         # set by receipt(): the metrics record this value, never a second computation
     normalized: set = field(default_factory=set)   # (path, first, last, quote) whose match ignored whitespace or line breaks
     dropped: int = 0
     summary: str = ''
@@ -363,6 +364,7 @@ def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str,
         shown += 1
     missing = tuple(r for r in roles if not any(v[3].upper().startswith(r) for v in out.verified))
     status, remaining = receipt_status(out, len(out.verified) - shown, missing)
+    out.status = status
     head = (f'[{label} · {model.name}{note} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
             f'{len(out.verified)} verified quote(s){loose}, {out.dropped} dropped (quote not found in source) · '
             f'quotes are verified, sentences are the model\'s · status: {status}]')
@@ -401,12 +403,19 @@ def extract_receipt(res: 'extract.Result', nbytes: int, max_items: int, label: s
         if len(res.unrecognized) > 15:
             lines.append(f'... {len(res.unrecognized) - 15} more')
     lines.append(f'Scope: {res.scope}.')
-    partial = bool(res.unrecognized) or hidden
-    lines[0] = head.replace('STATUS', 'partial' if partial else 'complete')
-    if partial:
+    if res.inspected == 0 and not res.unrecognized:
+        # Nothing of this kind was seen at all: "complete and empty" would read as "there are none", which is not known.
+        res.status = 'undetermined'
+        lines.append('Nothing in this scope was found in these files. This does not prove it is absent: the code may use a form the scope above '
+                     'does not cover. Check with one targeted grep.')
+    elif res.unrecognized or hidden:
+        res.status = 'partial'
         lines.append('Partial: verify the items under "Not recognized" or raise max_items; the rest is complete for the scope.')
-    elif not res.facts:
-        lines.append('Nothing found in this scope.')
+    else:
+        res.status = 'complete'
+        if not res.facts:
+            lines.append(f'None of the {res.inspected} item(s) inspected matches the filter.')
+    lines[0] = head.replace('STATUS', res.status)
     return '\n'.join(lines)
 
 
@@ -436,7 +445,7 @@ def ask(files: list[str], question: str, mode='find', quality: bool | None = Non
             raise AccessError(str(e)) from e
         text = extract_receipt(res, nbytes, max_items, f'local_ask extract={extraction}')
         record({'tool': 'ask', 'mode': 'extract', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
-                'verified': len(res.groups()), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': 'partial' if res.unrecognized else 'complete'})
+                'verified': len(res.groups()), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': res.status})
         return text
     tier = pick_tier(question, quality)
     model = model_for(cfg, tier)
@@ -454,7 +463,7 @@ def ask(files: list[str], question: str, mode='find', quality: bool | None = Non
     text = receipt(out, model, nbytes, max_items, 'local_ask' + note)
     record({'tool': 'ask', 'mode': mode, 'model': model.name, 'bytes_read': nbytes, 'chars_returned': len(text),
             'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors),
-            'status': receipt_status(out)[0]})
+            'status': out.status})
     return text
 
 
@@ -476,7 +485,7 @@ DETERMINISTIC_MAX_GROUPS = 12     # a log with more distinct events than this is
 HEAD_LINES, TAIL_LINES = 3, 5
 
 
-def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int) -> str:
+def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int) -> tuple[str, str]:
     events = sum(g.count for g in groups)
     in_events = sum(len(u) for u in logs.units(lines))
     head = (f'[local_digest · deterministic, no model · {nbytes // 1000} KB read locally · {len(groups)} distinct event(s), '
@@ -503,13 +512,13 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int)
         out += [f'- {ln.path}:{ln.no} | {_quote(ln.text.strip()[:MAX_QUOTE_SHOWN])}' for ln in chunk_ if ln.text.strip()]
     out.append(f'Kept {in_events} event line(s) in {len(groups)} group(s); the other {len(lines) - in_events} line(s) have no error-like wording and were not listed.')
     if not groups:
-        out[0] = head.replace('STATUS', 'partial')
-        out.append('No error-like line matched (error, exception, fatal, failed, timeout, warn...): read the final lines above.')
-    elif shown < len(groups):
-        out[0] = head.replace('STATUS', 'partial')
+        status = 'undetermined'
+        out.append('No error-like line matched (error, exception, fatal, failed, timeout, warn...): this does not prove the run was fine, '
+                   'read the final lines above.')
     else:
-        out[0] = head.replace('STATUS', 'complete')
-    return '\n'.join(out)
+        status = 'partial' if shown < len(groups) else 'complete'
+    out[0] = head.replace('STATUS', status)
+    return '\n'.join(out), status
 
 
 def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
@@ -518,9 +527,9 @@ def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     nbytes = sum(len(l.text) + 1 for l in lines)
     groups = logs.group_events(lines)
     if not focus and len(groups) <= DETERMINISTIC_MAX_GROUPS:
-        text = digest_receipt(lines, groups, nbytes, max_items)
+        text, status = digest_receipt(lines, groups, nbytes, max_items)
         record({'tool': 'digest', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
-                'verified': len(groups), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': 'complete' if groups else 'partial'})
+                'verified': len(groups), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': status})
         return text
     model = model_for(cfg, tier)
     kept = prefilter(lines) if nbytes > 20_000 else lines
@@ -528,5 +537,5 @@ def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     text = receipt(out, model, nbytes, max_items, f'local_digest ({len(kept)}/{len(lines)} lines kept)', roles=() if focus else DIGEST_ROLES)
     record({'tool': 'digest', 'model': model.name, 'bytes_read': nbytes, 'chars_returned': len(text),
             'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors),
-            'status': receipt_status(out)[0]})
+            'status': out.status})
     return text

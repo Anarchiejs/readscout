@@ -31,6 +31,8 @@ class Result:
     facts: list = field(default_factory=list)
     files: int = 0
     unrecognized: list = field(default_factory=list)    # (path, line, reason)
+    inspected: int = 0          # units the extractor recognized before any filter: 0 means "nothing of this kind was seen"
+    status: str = ''            # set by the receipt, recorded in the metrics: one computation, never two
 
     def groups(self) -> list[list[Fact]]:
         by_key: dict[str, list[Fact]] = {}
@@ -167,7 +169,8 @@ def _env_name(m: re.Match) -> str:
 
 def extract_env(sources: list[Source]) -> Result:
     res = Result('env', 'environment variables read by name through process.env, import.meta.env, Deno.env, os.environ and os.getenv '
-                        '(direct, bracket, destructuring and simple alias forms)')
+                        '(direct, bracket, destructuring and simple alias forms), and UPPER_CASE keys declared in Joi.object / z.object '
+                        'schemas or in pydantic BaseSettings classes (a variable validated but never read by name is listed too)')
     for src in sources:
         text = _code_lines(src)
         res.files += 1
@@ -200,7 +203,63 @@ def extract_env(sources: list[Source]) -> Result:
         for rx in _ENV_DYNAMIC:
             for m in rx.finditer(text):
                 res.unrecognized.append((src.path, src.line_of(m.start()), 'environment variable read with a computed name'))
+        for offset, name in _schema_keys(text):
+            add(name, offset, 'declared in a validation schema')
+        if src.path.endswith('.py'):
+            for ln, name in _settings_fields(src):
+                res.facts.append(Fact(name, src.path, ln, ln, 'pydantic settings field', src.row(ln)))
+    res.inspected = len(res.facts)
     return res
+
+
+_SCHEMA_CALL = re.compile(r'(?<![\w$.])(?:Joi|z)\s*\.\s*object\s*\(')
+_SCHEMA_KEY = re.compile(r'''['"]?([A-Z][A-Z0-9_]+)['"]?\s*:\s*(?:Joi|z)\s*\.''')
+
+
+def _depth(text: str, a: int, b: int) -> int:
+    """Nesting of ([{ at text[b], counted from text[a] and ignoring strings."""
+    depth, i = 0, a
+    while i < b:
+        c = text[i]
+        if c in '\'"`':
+            i = _skip_string(text, i)
+            continue
+        depth += (c in '([{') - (c in ')]}')
+        i += 1
+    return depth
+
+
+def _schema_keys(text: str):
+    """(offset, NAME) of the top-level UPPER_CASE keys of Joi.object({...}), Joi.object().keys({...}) and z.object({...})."""
+    inside = -1          # a schema nested in another one describes a sub-object, not environment variables
+    for m in _SCHEMA_CALL.finditer(text):
+        if m.start() < inside:
+            continue
+        end = call_end(text, m.end() - 1)
+        if end < 0:
+            continue
+        spans = [(m.end(), end)]
+        spans += [(text.find("(", st) + 1, cend) for name, _, st, cend in _chain_calls(text, end + 1) if name in ("keys", "append")]
+        inside = max(b for _, b in spans)
+        for a, b in spans:
+            brace = text.find("{", a, b)
+            if brace < 0:
+                continue
+            for k in _SCHEMA_KEY.finditer(text, brace, b):
+                if _depth(text, brace, k.start()) == 1:
+                    yield k.start(), k.group(1)
+
+
+def _settings_fields(src: Source):
+    try:
+        tree = ast.parse(src.text)
+    except SyntaxError:
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and any(ast.unparse(b).endswith('BaseSettings') for b in node.bases):
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and not item.target.id.startswith('_'):
+                    yield item.lineno, item.target.id.upper()
 
 
 # ---------------------------------------------------------------- Express routes
@@ -251,7 +310,7 @@ def extract_routes(sources: list[Source]) -> Result:
             seen.add(m.start())
             for name, cargs, start, cend in _chain_calls(text, end + 1):
                 if name in _METHODS:
-                    add(name, path, cargs, m.start(), cend)
+                    add(name, path, cargs, text.index('.', start), cend)      # the line of this method, not of route(...)
         for m in _ROUTE_CALL.finditer(text):
             recv = m.group(1)
             if recv.lower() in _NOT_ROUTERS or m.start() in seen:
@@ -270,6 +329,7 @@ def extract_routes(sources: list[Source]) -> Result:
             if not path.startswith(('/', '*')):
                 continue
             add(m.group(2), path, args[1:], m.start(), end)
+    res.inspected = len(res.facts)
     return res
 
 
@@ -287,11 +347,14 @@ def _deps_of(call: ast.Call) -> list[str]:
 
 
 def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
+    names = [n.strip() for n in re.split(r'[,|]', lacking) if n.strip()]
     scope = ('Python endpoint functions decorated with @x.get/post/put/patch/delete/route/api_route/websocket(path), with their full '
              'signature, decorator dependencies and the dependencies of their router (APIRouter(dependencies=...), include_router(..., dependencies=...))')
-    if lacking:
-        scope += f'; only endpoints whose decorator, signature and router dependencies do not mention "{lacking}" are listed. This is a property of ' \
-                 f'the endpoints analysed here, not a guarantee about the whole application'
+    if names:
+        scope += (f'; only endpoints whose decorator, signature and router dependencies mention none of {", ".join(names)} are listed. This is a '
+                  f'textual property of the endpoints analysed here: it is not the same as "public" or "not logged in" (authentication can come from '
+                  f'middleware, another module or the application) and it is not a guarantee about the whole application. Pass every name that counts '
+                  f'as protection, for example endpoints!CurrentUser,get_current_active_superuser')
     res = Result('endpoints', scope)
     trees = []
     for src in sources:
@@ -339,7 +402,8 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                 deco_deps = _deps_of(dec)
                 inherited = router_deps.get(recv, [])
                 blob = ' '.join([ast.unparse(dec), signature] + inherited)
-                if lacking and re.search(r'\b' + re.escape(lacking) + r'\b', blob):
+                res.inspected += 1
+                if any(re.search(r'\b' + re.escape(n) + r'\b', blob) for n in names):
                     continue
                 detail = signature[:300]
                 if deco_deps:
@@ -389,11 +453,12 @@ def extract_supabase(sources: list[Source]) -> Result:
             if mentions:
                 ln = src.line_of(m.start())
                 res.facts.append(Fact(f'rpc.{m.group(2)}', src.path, ln, ln, f'rpc {m.group(2)}', src.row(ln)))
+    res.inspected = len(res.facts)
     return res
 
 
 def run(kind: str, lines: list[Line]) -> Result:
-    """kind: env | routes | endpoints | supabase, and 'endpoints!Name' for the endpoints that never mention Name."""
+    """kind: env | routes | endpoints | supabase, and 'endpoints!A,B' for the endpoints that mention neither A nor B."""
     name, _, lacking = kind.partition('!')
     sources = group_files(lines)
     if name == 'env':
@@ -401,7 +466,7 @@ def run(kind: str, lines: list[Line]) -> Result:
     if name == 'routes':
         return extract_routes(sources)
     if name == 'endpoints':
-        return extract_endpoints(sources, lacking.strip())
+        return extract_endpoints(sources, lacking)
     if name == 'supabase':
         return extract_supabase(sources)
     raise ValueError(f'Unknown extraction "{kind}": use one of {", ".join(KINDS)}')

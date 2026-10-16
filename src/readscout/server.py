@@ -31,8 +31,9 @@ def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] 
     could not quote are dropped. mode='summary' adds a short unverified summary. quality: leave unset (auto:
     the bigger model for negative questions or when the fast one finds nothing), True to force it.
     extract (no model, exact): env | routes | endpoints | supabase lists those facts by syntax, and
-    'endpoints!X' lists the Python endpoints that never mention X; unrecognized code is listed in the receipt.
-    The receipt ends with Status: complete, partial or undetermined.
+    'endpoints!A,B' lists the Python endpoints that mention neither A nor B (a textual check, not proof that they are public).
+    Extraction lists every item of its kind: filtering is yours. Unrecognized code is listed, and an empty result is undetermined.
+    The receipt header says status: complete, partial or undetermined.
     Do not use for decisions (security, correctness) without opening the cited lines."""
     return _safe(tasks.ask, paths, question, mode, quality, max_items, extract)
 

@@ -132,3 +132,28 @@ def test_ask_with_extraction_never_starts_a_model(tmp_path, monkeypatch):
 
 def test_editing_module_still_importable():
     assert editing
+
+
+# ---------------------------------------------------------------- the metrics record the status the receipt printed
+
+def _header_status(text):
+    return text.splitlines()[0].rsplit('status: ', 1)[1].rstrip(']')
+
+
+def test_metrics_status_is_the_one_in_the_receipt_header(tmp_path, monkeypatch):
+    rows = []
+    monkeypatch.setattr(tasks, 'record', rows.append)
+    monkeypatch.setattr(tasks, 'load_config', lambda: ({'models': {}}, [tmp_path]))
+    (tmp_path / 'a.js').write_text('x = 1;\n')
+    text = tasks.ask(['a.js'], 'q', extraction='env')                       # empty extraction: undetermined
+    assert rows[-1]['status'] == _header_status(text) == 'undetermined'
+    (tmp_path / 'b.log').write_text('INFO fine\n')
+    text = tasks.digest('b.log')                                            # no error-like line: undetermined
+    assert rows[-1]['status'] == _header_status(text) == 'undetermined'
+    (tmp_path / 'c.log').write_text('\n'.join(f'ERROR kind{chr(97 + i)} failed' for i in range(15)) + '\n')
+    monkeypatch.setattr(tasks, 'model_for', lambda *a: Model('m'))
+    # a model digest that hides findings and has no FINAL label: the receipt says partial, so must the metrics
+    findings = [{'file': 'c.log', 'line': i, 'quote': f'ERROR kind{chr(96 + i)} failed', 'answer': f'ROOT CAUSE: {i}'} for i in range(1, 6)]
+    monkeypatch.setattr(tasks, 'chat', lambda *a, **k: Reply({'findings': findings}, 1, 1, 0.1))
+    text = tasks.digest('c.log', max_items=2)
+    assert rows[-1]['status'] == _header_status(text) == 'partial' and 'No finding labelled FINAL' in text and 'more finding(s) not shown' in text

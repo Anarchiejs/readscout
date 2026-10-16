@@ -162,3 +162,77 @@ def test_comment_lines_do_not_shift_the_reported_line():
     by = {g[0].key: g[0] for g in extract.run('env', lines).groups()}
     assert (by['LATE'].line, by['LATE'].cite) == (3, 'const x = process.env.LATE;')
     assert (by['LAST'].line, by['LAST'].cite) == (5, 'const y = process.env.LAST;')
+
+
+# ---------------------------------------------------------------- the three defects found by campaign 2
+
+JOI = '''const envVarsSchema = Joi.object()
+  .keys({
+    NODE_ENV: Joi.string().valid('production', 'test').required(),
+    PORT: Joi.number().default(3000),
+    JWT_RESET_PASSWORD_EXPIRATION_MINUTES: Joi.number()
+      .default(10),
+    nested: Joi.object({ INNER_UPPER: Joi.string() }),
+    SMTP_HOST: Joi.string().description('server'),
+  })
+  .unknown();
+const schema = z.object({ API_URL: z.string().url(), debug: z.boolean() });'''
+
+
+def test_env_lists_variables_declared_in_joi_and_zod_schemas_even_when_never_read_by_name():
+    res = extract.run('env', files(config_js=JOI))
+    assert keys(res) == ['API_URL', 'JWT_RESET_PASSWORD_EXPIRATION_MINUTES', 'NODE_ENV', 'PORT', 'SMTP_HOST']    # top level only, no nested INNER_UPPER
+    by = {g[0].key: g[0] for g in res.groups()}
+    assert by['PORT'].line == 4 and by['PORT'].detail == 'declared in a validation schema'
+
+
+def test_env_lists_pydantic_settings_fields():
+    res = extract.run('env', files(s_py='from pydantic_settings import BaseSettings\nclass Settings(BaseSettings):\n    database_url: str\n    _private: int = 1\n    debug: bool = False'))
+    assert keys(res) == ['DATABASE_URL', 'DEBUG']
+
+
+def test_a_secret_looking_name_does_not_break_the_code_the_schema_is_read_from(tmp_path):
+    # redaction used to swallow `JWT_SECRET: Joi.string().required().description(` and the closing bracket, losing every later key
+    (tmp_path / 'config.js').write_text("const s = Joi.object().keys({\n  A_ONE: Joi.string(),\n  JWT_SECRET: Joi.string().required().description('JWT secret key'),\n  B_TWO: Joi.number(),\n});\n")
+    from readscout.text import load_lines
+    res = extract.run('env', load_lines('config.js', [tmp_path]))
+    assert keys(res) == ['A_ONE', 'B_TWO', 'JWT_SECRET']
+
+
+def test_redaction_no_longer_breaks_python_files_so_their_endpoints_are_found(tmp_path):
+    (tmp_path / 'login.py').write_text('from fastapi import APIRouter\nrouter = APIRouter()\n\n@router.post("/login")\ndef login(form_data):\n    return authenticate(email=form_data.username, password=form_data.password)\n')
+    from readscout.text import load_lines
+    res = extract.run('endpoints', load_lines('login.py', [tmp_path]))
+    assert keys(res) == ['POST /login login'] and not res.unrecognized
+
+
+def test_chained_route_methods_are_reported_on_their_own_line():
+    res = extract.run('routes', files(r_js="router.route('/x')\n  .get(a)\n  .post(b);"))
+    assert {g[0].key: g[0].line for g in res.groups()} == {'GET /x': 2, 'POST /x': 3}
+
+
+def test_endpoints_lacking_several_names_and_the_scope_says_it_is_not_public():
+    code = files(api_py='''from fastapi import APIRouter, Depends
+router = APIRouter()
+
+@router.get("/me")
+def me(user: CurrentUser): ...
+
+@router.get("/admin", dependencies=[Depends(get_current_active_superuser)])
+def admin(): ...
+
+@router.get("/open")
+def open_(): ...''')
+    one = extract.run('endpoints!CurrentUser', code)
+    both = extract.run('endpoints!CurrentUser,get_current_active_superuser', code)
+    assert keys(one) == ['GET /admin admin', 'GET /open open_'] and keys(both) == ['GET /open open_']
+    assert 'not the same as "public"' in both.scope and both.inspected == 3
+
+
+def test_empty_results_are_undetermined_not_complete():
+    empty = extract.run('env', files(a_js='const x = 1;'))
+    text = tasks.extract_receipt(empty, 10, 40, 'q')
+    assert 'status: undetermined' in text and empty.status == 'undetermined' and 'does not prove it is absent' in text
+    filtered = extract.run('endpoints!Dep', files(a_py='@router.get("/x")\ndef f(d: Dep): ...'))
+    text = tasks.extract_receipt(filtered, 10, 40, 'q')
+    assert 'status: complete' in text and 'None of the 1 item(s) inspected matches the filter' in text
