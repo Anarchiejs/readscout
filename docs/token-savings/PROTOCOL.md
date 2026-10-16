@@ -314,3 +314,7 @@ Missing metrics are not measured, never zero-filled as measurements.
   "doctor_ok": true
 }
 ```
+
+## Deviation: interrupted pilot
+
+Coordinator interrupted the first pilot before its buffered output was saved. No completed final answer or usage was recoverable. The pilot is discarded after a harness change that persists raw events immediately. The interrupted attempt is retained with missing telemetry, not treated as zero tokens. No other measured session had started.

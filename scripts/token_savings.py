@@ -318,16 +318,24 @@ def run_one(work, meta, task, config, attempt=1):
     args += [prompt]
     started = time.time()
     timed_out = False
-    try:
-        proc = command(args, env, timeout=1200)
-        stdout, stderr, exit_code = proc.stdout, proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        stdout = exc.stdout or b''
-        stderr = exc.stderr or b''
-        stdout = stdout.decode('utf-8', errors='replace') if isinstance(stdout, bytes) else stdout
-        stderr = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else stderr
-        exit_code = None
+    # Persist output immediately in the private temporary workspace so an interrupted
+    # coordinating session cannot lose the evidence or accidentally rerun a cell.
+    journal = work / f'{slug}.started.json'
+    write_json(journal, {'task': key, 'config': config, 'attempt': attempt, 'started': started})
+    raw = work / f'{slug}.events.jsonl'
+    err = work / f'{slug}.stderr.txt'
+    with raw.open('wb') as stdout_file, err.open('wb') as stderr_file:
+        proc = subprocess.Popen(args, env=env, stdout=stdout_file, stderr=stderr_file,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        try:
+            exit_code = proc.wait(timeout=1200)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            proc.terminate()  # Only this harness-owned process.
+            proc.wait(timeout=30)
+            exit_code = None
+    stdout = raw.read_text(encoding='utf-8', errors='replace')
+    stderr = err.read_text(encoding='utf-8', errors='replace')
     row = {'task': key, 'config': config, 'attempt': attempt, 'wall_seconds': round(time.time() - started, 3),
            'exit_code': exit_code, 'timeout': timed_out, **parse_events(stdout)}
     raw_answer = final.read_text(encoding='utf-8') if final.exists() else ''
@@ -377,6 +385,9 @@ def run(phase):
             previous = [r for r in rows if r['task'] == key and r['config'] == config]
             if previous:
                 continue  # Explicit resume never repeats a cell.
+            slug = key.replace(':', '_') + f'-{config}-1'
+            if (work / f'{slug}.started.json').exists():
+                raise SystemExit('Unreconciled interrupted attempt; recover its raw files before resuming')
             row = run_one(work, meta, all_tasks.get(key), config)
             rows.append(row)
             write_json(work / 'meta.json', meta)
