@@ -29,7 +29,7 @@ def test_tools_call_the_operations(monkeypatch):
     assert server.local_ask(['src'], 'where?') == 'ASK'
     assert server.local_digest('build.log', 'tests') == 'DIGEST'
     assert server.local_edit(['a.py'], 'add types', [['pytest']]) == 'EDIT'
-    assert calls == [('ask', (['src'], 'where?', 'find', None, 40)), ('digest', ('build.log', 'tests')),
+    assert calls == [('ask', (['src'], 'where?', 'find', None, 40, '')), ('digest', ('build.log', 'tests')),
                      ('edit', (['a.py'], 'add types', [['pytest']]))]
 
 

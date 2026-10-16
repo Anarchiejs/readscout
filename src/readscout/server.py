@@ -23,15 +23,18 @@ def _safe(fn, *a, **k):
 
 @mcp.tool(annotations=READ)
 def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] = 'find', quality: bool | None = None,
-              max_items: int = 40) -> str:
+              max_items: int = 40, extract: str = '') -> str:
     """Read files or directories with a local model so you don't have to; get back a short answer.
     Use instead of Read/Grep when you need facts from large or many files but not the files themselves
     ("which routes lack auth", "where is X handled", "what does this module do").
     Each fact comes with a quote verified verbatim in the source and its real path:line; facts the model
     could not quote are dropped. mode='summary' adds a short unverified summary. quality: leave unset (auto:
     the bigger model for negative questions or when the fast one finds nothing), True to force it.
+    extract (no model, exact): env | routes | endpoints | supabase lists those facts by syntax, and
+    'endpoints!X' lists the Python endpoints that never mention X; unrecognized code is listed in the receipt.
+    The receipt ends with Status: complete, partial or undetermined.
     Do not use for decisions (security, correctness) without opening the cited lines."""
-    return _safe(tasks.ask, paths, question, mode, quality, max_items)
+    return _safe(tasks.ask, paths, question, mode, quality, max_items, extract)
 
 
 @mcp.tool(annotations=READ)

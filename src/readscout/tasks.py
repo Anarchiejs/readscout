@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import llamacpp, paths
+from . import extract, llamacpp, logs, paths
 from .backend import UNLOAD_AFTER, BackendError, Model, chat, ensure_ollama, installed_models
 from .text import AccessError, Line, chunk, exact_text, is_sensitive, load_lines, locate, outside, render, resolve
 
@@ -132,9 +132,22 @@ def record(entry):
 # ---------------------------------------------------------------- ask / digest
 
 MAX_FINDINGS = 30
-FIND_SCHEMA = {'type': 'object', 'properties': {'findings': {'type': 'array', 'maxItems': MAX_FINDINGS, 'items': {
-    'type': 'object', 'properties': {'file': {'type': 'string'}, 'line': {'type': 'integer'}, 'quote': {'type': 'string'}, 'answer': {'type': 'string'}},
-    'required': ['file', 'line', 'quote', 'answer'], 'additionalProperties': False}}}, 'required': ['findings'], 'additionalProperties': False}
+MAX_CAP = 100
+TOKENS_PER_FINDING = 75      # file + line + a 120 character quote + a 30 word answer
+
+
+def find_schema(cap: int = MAX_FINDINGS) -> dict:
+    return {'type': 'object', 'properties': {'findings': {'type': 'array', 'maxItems': cap, 'items': {
+        'type': 'object', 'properties': {'file': {'type': 'string'}, 'line': {'type': 'integer'}, 'quote': {'type': 'string'}, 'answer': {'type': 'string'}},
+        'required': ['file', 'line', 'quote', 'answer'], 'additionalProperties': False}}}, 'required': ['findings'], 'additionalProperties': False}
+
+
+FIND_SCHEMA = find_schema()
+
+
+def cap_for(max_items: int) -> int:
+    """One ceiling for what the model may list per chunk and what the receipt may show: raising max_items raises both."""
+    return min(MAX_CAP, max(MAX_FINDINGS, max_items))
 
 FIND_SYSTEM = """You read source excerpts for a senior engineer who will NOT read them. Answer the question using only the excerpt.
 Rules:
@@ -148,7 +161,8 @@ Rules:
 
 SUMMARY_SCHEMA = {'type': 'object', 'properties': {
     'evidence': {'type': 'array', 'maxItems': 12, 'items': {'type': 'object', 'properties': {
-        'line': {'type': 'integer'}, 'quote': {'type': 'string'}, 'claim': {'type': 'string'}}, 'required': ['file', 'line', 'quote', 'claim'], 'additionalProperties': False}},
+        'file': {'type': 'string'}, 'line': {'type': 'integer'}, 'quote': {'type': 'string'}, 'claim': {'type': 'string'}},
+        'required': ['file', 'line', 'quote', 'claim'], 'additionalProperties': False}},
     'summary': {'type': 'string'}}, 'required': ['evidence', 'summary'], 'additionalProperties': False}
 
 SUMMARY_SYSTEM = """You summarize source excerpts for a senior engineer who will NOT read them.
@@ -163,8 +177,8 @@ REDUCE_SCHEMA = {'type': 'object', 'properties': {'summary': {'type': 'string'}}
 
 @dataclass
 class Outcome:
-    verified: list = field(default_factory=list)   # (path, first, last, text, quote)
-    normalized: set = field(default_factory=set)
+    verified: list = field(default_factory=list)   # (path, first, last, text, quote); quote is read from the source
+    normalized: set = field(default_factory=set)   # (path, first, last, quote) whose match ignored whitespace or line breaks
     dropped: int = 0
     summary: str = ''
     calls: int = 0
@@ -173,6 +187,8 @@ class Outcome:
     seconds: float = 0.0
     chunks: int = 0
     capped: int = 0          # chunks whose answer hit the findings cap: the list may be incomplete
+    cap: int = MAX_FINDINGS  # the per-chunk cap that applied
+    context: dict = field(default_factory=dict)    # (path, first, last) -> (line before, line after), read from the file
     cut: int = 0             # lines longer than the line limit: their end was never read
     errors: list = field(default_factory=list)
 
@@ -185,11 +201,14 @@ def _budget(model: Model, max_out: int, fixed_chars: int = 0) -> int:
     return max(2000, int((model.ctx - max_out - 300) * model.chars_per_token * 0.9) - fixed_chars)
 
 
-def run_ask(lines: list[Line], question: str, model: Model, mode='find', max_out=2048) -> Outcome:
-    out = Outcome()
+def run_ask(lines: list[Line], question: str, model: Model, mode='find', max_out=2048, cap=MAX_FINDINGS, context=0) -> Outcome:
+    out = Outcome(cap=cap)
     if len(question) > MAX_QUESTION_CHARS:
         raise AccessError(f'Question longer than {MAX_QUESTION_CHARS} characters: shorten it')
     system = FIND_SYSTEM if mode == 'find' else SUMMARY_SYSTEM
+    schema = find_schema(cap) if mode == 'find' else SUMMARY_SCHEMA
+    if mode == 'find' and cap > MAX_FINDINGS:
+        max_out = max(max_out, cap * TOKENS_PER_FINDING)    # a long exhaustive list needs room to be written
     out.cut = sum(1 for ln in lines if ln.cut)
     parts = chunk(lines, _budget(model, max_out, len(system) + len(question) + 200))
     used: set = set()   # occurrences already claimed, so identical quotes land on distinct lines
@@ -198,8 +217,7 @@ def run_ask(lines: list[Line], question: str, model: Model, mode='find', max_out
     for part in parts:
         user = f'EXCERPT (lines {part[0].path}:{part[0].no} to {part[-1].path}:{part[-1].no}):\n{render(part)}\n\nQUESTION: {question}'
         try:
-            reply = chat(model, system, user,
-                         FIND_SCHEMA if mode == 'find' else SUMMARY_SCHEMA, max_tokens=max_out)
+            reply = chat(model, system, user, schema, max_tokens=max_out)
         except BackendError as e:
             out.errors.append(str(e)[:200])
             continue
@@ -208,8 +226,9 @@ def run_ask(lines: list[Line], question: str, model: Model, mode='find', max_out
         out.output_tokens += reply.output_tokens
         out.seconds += reply.seconds
         items = reply.data.get('findings') if mode == 'find' else reply.data.get('evidence')
-        if mode == 'find' and len(items or []) >= MAX_FINDINGS:
+        if mode == 'find' and len(items or []) >= cap:
             out.capped += 1
+        neighbours = {(ln.path, ln.no): ln.text.strip() for ln in part} if context else {}
         for it in items or []:
             text = (it.get('answer') or it.get('claim') or '').strip()
             hint = it.get('line') if isinstance(it.get('line'), int) else 0
@@ -221,6 +240,10 @@ def run_ask(lines: list[Line], question: str, model: Model, mode='find', max_out
                 out.verified.append((*where, text, shown))
                 if kind == 'normalized':
                     out.normalized.add((*where, shown))
+                if context:
+                    before, after = neighbours.get((where[0], where[1] - 1)), neighbours.get((where[0], where[2] + 1))
+                    if before or after:
+                        out.context[where] = (before, after)
             else:
                 out.dropped += 1
         if mode != 'find' and reply.data.get('summary'):
@@ -296,28 +319,94 @@ def _quote(q: str) -> str:
     return f'« {one[:MAX_QUOTE_SHOWN]} » (fragment of {len(one)} characters)'
 
 
-def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str) -> str:
+MAX_RECEIPT_CHARS = 12000     # the receipt is bounded: what does not fit is counted, never silently dropped
+
+
+def receipt_status(out: Outcome, hidden: int = 0, missing_roles: tuple = ()) -> tuple[str, list[str]]:
+    """complete, partial or undetermined, computed from what the host saw (never from a model's claim), and what remains to check."""
+    remaining = []
+    if not out.verified and not out.summary:
+        remaining.append('No verifiable finding: the answer is not in these files, or the model could not quote it. Do it yourself.')
+    if out.capped:
+        remaining.append(f'The list may be incomplete: {out.cap} findings is the maximum per chunk. Ask about fewer files or a narrower question.')
+    if out.cut:
+        remaining.append(f'{out.cut} line(s) longer than 4000 characters were cut: the end of those lines was not read.')
+    if hidden:
+        remaining.append(f'{hidden} more finding(s) not shown (raise max_items).')
+    remaining += [f'No finding labelled {r}: check that part of the file yourself.' for r in missing_roles]
+    if out.errors:
+        remaining.append('A chunk failed, so part of the input was not read.')
+    if not out.verified and not out.summary:
+        return 'undetermined', remaining
+    return ('partial' if remaining else 'complete'), remaining
+
+
+def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str, roles: tuple = ()) -> str:
     note = f' ({model.note})' if model.note else ''
     loose = f' ({len(out.normalized)} with whitespace normalized)' if out.normalized else ''
-    head = (f'[{label} · {model.name}{note} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
-            f'{len(out.verified)} verified quote(s){loose}, {out.dropped} dropped (quote not found in source) · '
-            f'quotes are verified, sentences are the model\'s]')
-    lines = [head]
+    lines = []
     if out.summary:
         lines.append('Summary (unverified, model-written): ' + no_em_dash(_clean(out.summary, 1500)))
+    size, shown = 0, 0
     for path, a, b, text, quote in out.verified[:max_items]:
         loc = f'{path}:{a}' if a == b else f'{path}:{a}-{b}'
-        lines.append(f'- {loc} : {no_em_dash(_clean(text))} {_quote(quote)}')
-    if out.cut:
-        lines.append(f'{out.cut} line(s) longer than 4000 characters were cut: the end of those lines was not read.')
-    if out.capped:
-        lines.append(f'The list may be incomplete: {MAX_FINDINGS} findings is the maximum per chunk. Ask about fewer files or a narrower question.')
-    if len(out.verified) > max_items:
-        lines.append(f'... {len(out.verified) - max_items} more finding(s) not shown (raise max_items).')
-    if not out.verified and not out.summary:
-        lines.append('No verifiable finding: the answer is not in these files, or the model could not quote it. Do it yourself.')
+        row = f'- {loc} : {no_em_dash(_clean(text))} {_quote(quote)}'
+        before, after = out.context.get((path, a, b), (None, None))
+        if before:
+            row += f'\n    above: {before[:160]}'
+        if after:
+            row += f'\n    below: {after[:160]}'
+        if shown and size + len(row) > MAX_RECEIPT_CHARS:
+            break
+        lines.append(row)
+        size += len(row) + 1
+        shown += 1
+    missing = tuple(r for r in roles if not any(v[3].upper().startswith(r) for v in out.verified))
+    status, remaining = receipt_status(out, len(out.verified) - shown, missing)
+    head = (f'[{label} · {model.name}{note} · {out.chunks} chunk(s), {nbytes // 1000} KB read locally, {out.seconds:.0f} s · '
+            f'{len(out.verified)} verified quote(s){loose}, {out.dropped} dropped (quote not found in source) · '
+            f'quotes are verified, sentences are the model\'s · status: {status}]')
+    lines = [head] + lines + remaining
     if out.errors:
         lines.append('Errors: ' + ' | '.join(out.errors[:3]))
+    return '\n'.join(lines)
+
+
+def extract_receipt(res: 'extract.Result', nbytes: int, max_items: int, label: str) -> str:
+    """One line per fact group: path:line | what | quote read from the file. The status is structural: it is partial exactly
+    when a construct was seen that the extractor does not understand, and those places are listed."""
+    groups = res.groups()
+    head = (f'[{label} · deterministic, no model · {res.files} file(s), {nbytes // 1000} KB read locally · '
+            f'{len(groups)} distinct, {len(res.facts)} occurrence(s) · quotes are lines read from the files · status: STATUS]')
+    lines, size, shown = [head], len(head), 0
+    for g in groups[:max_items]:
+        first = g[0]
+        loc = f'{first.path}:{first.line}' if first.end == first.line else f'{first.path}:{first.line}-{first.end}'
+        more = ''
+        if len(g) > 1:
+            where = ', '.join(f'{f.path}:{f.line}' for f in g[1:6])
+            more = f' (+{len(g) - 1} more: {where}{", ..." if len(g) > 6 else ""})'
+        row = f'- {loc} | {first.key}{more} | {first.detail} | {_quote(first.cite)}'
+        if shown and size + len(row) > MAX_RECEIPT_CHARS:
+            break
+        lines.append(row)
+        size += len(row) + 1
+        shown += 1
+    hidden = len(groups) - shown
+    if hidden:
+        lines.append(f'... {hidden} more distinct item(s) not shown (raise max_items).')
+    if res.unrecognized:
+        lines.append(f'Not recognized ({len(res.unrecognized)}), check these yourself:')
+        lines += [f'- {p}:{n} {why}' for p, n, why in res.unrecognized[:15]]
+        if len(res.unrecognized) > 15:
+            lines.append(f'... {len(res.unrecognized) - 15} more')
+    lines.append(f'Scope: {res.scope}.')
+    partial = bool(res.unrecognized) or hidden
+    lines[0] = head.replace('STATUS', 'partial' if partial else 'complete')
+    if partial:
+        lines.append('Partial: verify the items under "Not recognized" or raise max_items; the rest is complete for the scope.')
+    elif not res.facts:
+        lines.append('Nothing found in this scope.')
     return '\n'.join(lines)
 
 
@@ -335,59 +424,109 @@ def pick_tier(question: str, quality: bool | None) -> str:
     return 'quality' if NEGATION.search(NOT_A_NEGATION.sub(' ', question)) else 'fast'
 
 
-def ask(files: list[str], question: str, mode='find', quality: bool | None = None, max_items=40) -> str:
+def ask(files: list[str], question: str, mode='find', quality: bool | None = None, max_items=40, extraction: str = '') -> str:
     cfg, roots = load_config()
-    tier = pick_tier(question, quality)
     lines = gather(files, roots, paths.allowed_folders(cfg))
     nbytes = sum(len(l.text) + 1 for l in lines)
+    if extraction:
+        # Deterministic: syntax finds the facts, no model is started, and what it does not understand is listed.
+        try:
+            res = extract.run(extraction, lines)
+        except ValueError as e:
+            raise AccessError(str(e)) from e
+        text = extract_receipt(res, nbytes, max_items, f'local_ask extract={extraction}')
+        record({'tool': 'ask', 'mode': 'extract', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
+                'verified': len(res.groups()), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': 'partial' if res.unrecognized else 'complete'})
+        return text
+    tier = pick_tier(question, quality)
     model = model_for(cfg, tier)
-    out = run_ask(lines, question, model, mode)
+    cap = cap_for(max_items)
+    out = run_ask(lines, question, model, mode, cap=cap)
     note = ''
     if tier == 'fast' and quality is None and mode == 'find' and not out.verified and not out.errors:
         # Nothing verifiable from the fast model: try the stronger one before giving up (local cost only).
         stronger = model_for(cfg, 'quality')
         if stronger.name != model.name:
             model = stronger
-            retry = run_ask(lines, question, model, mode)
+            retry = run_ask(lines, question, model, mode, cap=cap)
             retry.seconds += out.seconds
             out, note = retry, ' · retried with quality model'
     text = receipt(out, model, nbytes, max_items, 'local_ask' + note)
     record({'tool': 'ask', 'mode': mode, 'model': model.name, 'bytes_read': nbytes, 'chars_returned': len(text),
-            'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors)})
+            'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors),
+            'status': receipt_status(out)[0]})
     return text
 
 
-ERROR_LINE = re.compile(r'(?i)\b(error|err!|exception|traceback|fatal|fail(ed|ure)?|panic|assert|denied|refused|timed? ?out|cannot|unable|undefined|not found|warn(ing)?)\b|^\s*at |^E\s')
+ERROR_LINE = logs.ERROR_LINE
 
 
 def prefilter(lines: list[Line], keep_head=20, keep_tail=60, context=2) -> list[Line]:
-    """Keep the head, the tail and suspicious lines with context; drop repeated lines (numbers ignored)."""
-    keep = set(range(min(keep_head, len(lines)))) | set(range(max(0, len(lines) - keep_tail), len(lines)))
-    for i, ln in enumerate(lines):
-        if ERROR_LINE.search(ln.text):
-            keep.update(range(max(0, i - context), min(len(lines), i + context + 1)))
-    seen, out = set(), []
-    for i in sorted(keep):
-        shape = re.sub(r'\d+|0x[0-9a-f]+', '#', lines[i].text.strip().lower())
-        if shape and shape in seen:
-            continue
-        seen.add(shape)
-        out.append(lines[i])
-    return out
+    """For the model: head, tail, and every event group's first and last occurrence (see logs.prefilter)."""
+    return logs.prefilter(lines, keep_head, keep_tail, context)
 
 
-DIGEST_QUESTION = ('What went wrong? Give first the earliest root-cause error, then each distinct other error or failing test '
-                   '(one finding each), then the final outcome. Ignore noise and repeated messages.')
+# The earliest error is not always the cause (ordering is not causality): the labels let the receipt say what is missing.
+DIGEST_QUESTION = ('What went wrong? Start each answer with a label: "ROOT CAUSE:" for the earliest error that explains the rest (say '
+                   '"possible" if the order alone does not prove it), "CONSEQUENCE:" for each distinct other error or failing test '
+                   '(one finding each, keep the ids of the resource, request or worker), "FINAL:" for the final outcome. '
+                   'Ignore noise and repeated messages.')
+DIGEST_ROLES = ('ROOT CAUSE', 'FINAL')
+DETERMINISTIC_MAX_GROUPS = 12     # a log with more distinct events than this is interpreted by the model
+HEAD_LINES, TAIL_LINES = 3, 5
+
+
+def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int) -> str:
+    events = sum(g.count for g in groups)
+    in_events = sum(len(u) for u in logs.units(lines))
+    head = (f'[local_digest · deterministic, no model · {nbytes // 1000} KB read locally · {len(groups)} distinct event(s), '
+            f'{events} occurrence(s) in {len(lines)} lines · quotes are lines read from the file · status: STATUS]')
+    out = [head, 'Chronological order of first occurrence. The first event is not necessarily the cause: no cause is inferred here.']
+    size = len(head)
+    for g in groups[:max_items]:
+        first = g.first[0]
+        times = f' x{g.count}, last at line {g.last_start.no}' if g.count > 1 else ''
+        row = f'- {first.path}:{first.no}{times} | {_quote(first.text.strip())}'
+        if len(g.first) > 1:
+            row += f' ... ends {first.path}:{g.first[-1].no} {_quote(g.first[-1].text.strip())}'
+        if g.count > 1 and len(g.variants) > 1:
+            row += f' | distinct values: {", ".join(g.variants)}'
+        if size + len(row) > MAX_RECEIPT_CHARS:
+            break
+        out.append(row)
+        size += len(row) + 1
+    shown = len(out) - 2
+    if shown < len(groups):
+        out.append(f'... {len(groups) - shown} more distinct event(s) not shown (raise max_items).')
+    for title, chunk_ in (('First lines', lines[:HEAD_LINES]), ('Final lines', lines[-TAIL_LINES:])):
+        out.append(f'{title}:')
+        out += [f'- {ln.path}:{ln.no} | {_quote(ln.text.strip()[:MAX_QUOTE_SHOWN])}' for ln in chunk_ if ln.text.strip()]
+    out.append(f'Kept {in_events} event line(s) in {len(groups)} group(s); the other {len(lines) - in_events} line(s) have no error-like wording and were not listed.')
+    if not groups:
+        out[0] = head.replace('STATUS', 'partial')
+        out.append('No error-like line matched (error, exception, fatal, failed, timeout, warn...): read the final lines above.')
+    elif shown < len(groups):
+        out[0] = head.replace('STATUS', 'partial')
+    else:
+        out[0] = head.replace('STATUS', 'complete')
+    return '\n'.join(out)
 
 
 def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     cfg, roots = load_config()
     lines = load_lines(path, roots, allowed=paths.allowed_folders(cfg))
-    model = model_for(cfg, tier)
     nbytes = sum(len(l.text) + 1 for l in lines)
+    groups = logs.group_events(lines)
+    if not focus and len(groups) <= DETERMINISTIC_MAX_GROUPS:
+        text = digest_receipt(lines, groups, nbytes, max_items)
+        record({'tool': 'digest', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
+                'verified': len(groups), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': 'complete' if groups else 'partial'})
+        return text
+    model = model_for(cfg, tier)
     kept = prefilter(lines) if nbytes > 20_000 else lines
-    out = run_ask(kept, focus or DIGEST_QUESTION, model, 'find')
-    text = receipt(out, model, nbytes, max_items, f'local_digest ({len(kept)}/{len(lines)} lines kept)')
+    out = run_ask(kept, focus or DIGEST_QUESTION, model, 'find', cap=cap_for(max_items), context=1)
+    text = receipt(out, model, nbytes, max_items, f'local_digest ({len(kept)}/{len(lines)} lines kept)', roles=() if focus else DIGEST_ROLES)
     record({'tool': 'digest', 'model': model.name, 'bytes_read': nbytes, 'chars_returned': len(text),
-            'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors)})
+            'verified': len(out.verified), 'dropped': out.dropped, 'seconds': round(out.seconds, 1), 'errors': len(out.errors),
+            'status': receipt_status(out)[0]})
     return text
