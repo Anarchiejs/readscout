@@ -137,5 +137,6 @@ def test_models_free_memory_by_themselves(monkeypatch):
 
 def test_skill_forbids_starting_models_and_explains_auto_unload():
     from readscout.agents import SKILL
-    text = SKILL.read_text(encoding='utf-8')
+    # the core points to references for the details: the rules must exist across the skill folder
+    text = '\n'.join(p.read_text(encoding='utf-8') for p in sorted(SKILL.parent.rglob('*.md')))
     assert 'one minute after the last call' in text and 'Never start' in text and 'readscout stop' in text

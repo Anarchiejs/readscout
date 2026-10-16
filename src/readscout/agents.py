@@ -40,6 +40,9 @@ def _run(cmd):
 def _copy_skill(dest: Path):
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(SKILL, dest)
+    refs = SKILL.parent / 'references'
+    if refs.is_dir():       # the core points to these files by relative path
+        shutil.copytree(refs, dest.parent / 'references', dirs_exist_ok=True)
 
 
 def status() -> dict:
