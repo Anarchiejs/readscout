@@ -6,6 +6,8 @@
 
 Sur 15 tâches Codex, A utilise 846 542 tokens et B, avec readscout, 865 972, soit 2,3 % en plus. Readscout est appelé sur 4 tâches ; une exécution par cas sur une seule machine ne démontre pas une économie générale. [Rapport](docs/TOKEN-SAVINGS.md).
 
+La [campagne 2](docs/TOKEN-SAVINGS-V2.md) a été arrêtée au pilote sans appel MCP : elle ne permet pas de conclure à une économie due aux améliorations, avec une seule tâche observée et aucun résultat de validation indépendante.
+
 <!-- token-savings:end -->
 
 **Des modèles locaux lisent tes fichiers pour ton agent de code.** Quand Claude Code ou Codex a besoin d'informations

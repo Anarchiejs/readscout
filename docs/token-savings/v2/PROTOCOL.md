@@ -1054,3 +1054,7 @@ Original and new conditions differ in schema/skill/digest/tool descriptions.
   "raw_bytes": 0
 }
 ```
+
+## Observed stop: no real B2 MCP execution
+
+Mandatory stop: first completed B2 pilot session made no readscout MCP call. Remaining pilot, controls and main cells not started. No synthetic replacement and no extra sessions.

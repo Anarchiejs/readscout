@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preregister token-savings campaign 2 and publish its stopped pilot, structural coverage and separate scorer results.
+
 - Add an isolated, preregistered Codex token-savings experiment with raw evidence,
   blind source-verified grading, generated charts and reports. See [the results](docs/TOKEN-SAVINGS.md):
   enabling readscout does not establish a general token saving in this campaign.

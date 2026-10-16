@@ -180,3 +180,7 @@ Retained raw evidence: 1834103 bytes, including discarded traces. The original s
 ## Reproduce
 
 Use a temporary checkout of frozen source `6bb283e073254c9e19eedb025a750d50e541f46f`, copy the final harness and local probe from this branch into scripts/, create its development venv and use the recorded Codex/Ollama versions. For a new campaign, move any published generated artifacts aside in that temporary checkout; prepare refuses to overwrite an existing campaign. Run `python scripts/token_savings.py prepare`, review and commit the protocol and harness, then `pilot`, `controls`, `remaining`, `grade`, `report`, and `cleanup` in that order. If the natural pilot makes no reading call, run `python scripts/token_savings.py validate-mcp` and commit its protocol amendment before controls; the [local probe](../scripts/token_savings_probe.py) uses a deterministic loopback provider with no online model or credentials. Do not repeat the pilot. The run commands resume without repeating existing cells. Never reinterpret a failed pilot as a savings result. The report subcommand works offline using only results.json. All retained raw attempts are in [runs/](token-savings/runs/).
+
+## Campaign 2
+
+See [Campaign 2](TOKEN-SAVINGS-V2.md) for the separately preregistered follow-up and its mandatory pilot stop.
