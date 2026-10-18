@@ -10,6 +10,7 @@ from .text import AccessError
 
 mcp = FastMCP('readscout')
 READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+# structured_output=False: a `-> str` tool would also get a structured copy of its text, which the client sends the agent too.
 
 
 def _safe(fn, *a, **k):
@@ -21,33 +22,30 @@ def _safe(fn, *a, **k):
         return f'readscout ERROR: {e}. Do the task yourself (diagnose with `{paths.cli()} doctor`).'
 
 
-@mcp.tool(annotations=READ)
+@mcp.tool(annotations=READ, structured_output=False)
 def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] = 'find', quality: bool | None = None,
               max_items: int = 40, extract: str = '') -> str:
-    """Read files or directories with a local model so you don't have to; get back a short answer.
-    Use instead of Read/Grep when you need facts from large or many files but not the files themselves
-    ("which routes lack auth", "where is X handled", "what does this module do").
-    Each fact comes with a quote verified verbatim in the source and its real path:line; facts the model
-    could not quote are dropped. mode='summary' adds a short unverified summary. quality: leave unset (auto:
-    the bigger model for negative questions or when the fast one finds nothing), True to force it.
-    extract (no model, exact): env | routes | endpoints | supabase lists those facts by syntax, and
-    'endpoints!A,B' lists the Python endpoints that mention neither A nor B (a textual check, not proof that they are public).
-    Extraction lists every item of its kind: filtering is yours. Unrecognized code is listed, and an empty result is undetermined.
-    The receipt header says status: complete, partial or undetermined.
-    Do not use for decisions (security, correctness) without opening the cited lines."""
+    """Get facts from many or large files without reading them: pass paths (files or folders) and a question, never
+    contents. Skip it when one grep or one short file answers. Each fact has its real path:line and a quote verified
+    verbatim in the source; unquotable facts are dropped. mode='summary' adds an unverified summary; leave quality unset.
+    extract (exact, no model) env | routes | endpoints | supabase lists every item of that kind, filtering is yours;
+    'endpoints!A,B' = Python endpoints mentioning neither A nor B (textual, not proof that they are public).
+    Header status: complete = answer from the receipt, no re-read (a model's sentence is not proof: open the cited
+    lines before a security or correctness decision); partial = check only what it lists; undetermined = do it yourself."""
     return _safe(tasks.ask, paths, question, mode, quality, max_items, extract)
 
 
-@mcp.tool(annotations=READ)
+@mcp.tool(annotations=READ, structured_output=False)
 def local_digest(path: str, focus: str = '') -> str:
-    """Triage a long log or command output file (CI log, test output, server log) locally.
-    Returns the root-cause error and distinct failures with verified path:line quotes, instead of
-    loading the whole file into context. Tip: redirect a noisy command to a file, then digest it."""
+    """Triage a long log or command output saved to a file (redirect a noisy command first) without loading it:
+    every error-like event with path:line, short traces whole, the final lines; a model only for a varied log or a
+    focus that is not about failures. Status: complete = cite from the receipt, no re-read; partial = read only the
+    lines it names."""
     return _safe(tasks.digest, path, focus)
 
 
 # destructiveHint is True on purpose: the files are overwritten and the gate commands run on the user's machine with their rights.
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False), structured_output=False)
 def local_edit(paths: list[str], instruction: str, gate: list[list[str]] | None = None) -> str:
     """Apply a small, fully specified mechanical change with a local model (docstrings, comments, type hints,
     renames, boilerplate, test scaffolding, applying a decided pattern). Pass paths, not contents: do not

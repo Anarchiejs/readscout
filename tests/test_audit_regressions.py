@@ -138,21 +138,17 @@ value = os.environ['REAL'] # os.getenv('FAKE3')
     assert res.facts[0].line == 4
 
 
-def test_template_interpolation_is_reported_as_unsupported():
+def test_template_interpolation_is_read_as_code():
+    # Was "reported as unsupported" until the benchmark of 18 October: 4 of 34 variables were then missing.
     res = extract.run('env', [Line('a.js', 1, 'const s=`value ${process.env.REAL}`;')])
-    assert not res.facts and res.unrecognized
+    assert {f.key for f in res.facts} == {'REAL'} and not res.unrecognized
 
 
-@pytest.mark.parametrize('expression', [
-    'f"os.getenv(\'FAKE\') {42}"',
-    'f"value {os.getenv(\'INNER\')}"',
-])
-def test_python_formatted_strings_are_not_invented_reads(expression):
-    text = f'import os\nexample = {expression}\nvalue = os.getenv("REAL")'
+def test_python_formatted_string_text_is_not_an_invented_read():
+    # Interpolated expressions: see test_receipt_regressions.py (their handling depends on the Python version).
+    text = 'import os\nexample = f"os.getenv(\'FAKE\') {42}"\nvalue = os.getenv("REAL")'
     lines = [Line('a.py', n, row) for n, row in enumerate(text.splitlines(), 1)]
-    res = extract.run('env', lines)
-    assert {f.key for f in res.facts} == {'REAL'}
-    assert res.unrecognized
+    assert {f.key for f in extract.run('env', lines).facts} == {'REAL'}
 
 
 def test_schema_quoted_keys_still_work_with_string_filter():

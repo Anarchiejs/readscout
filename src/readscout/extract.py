@@ -35,6 +35,7 @@ class Result:
     unrecognized: list = field(default_factory=list)    # (path, line, reason)
     inspected: int = 0          # units the extractor recognized before any filter: 0 means "nothing of this kind was seen"
     status: str = ''            # set by the receipt, recorded in the metrics: one computation, never two
+    coverage: list = field(default_factory=list)     # lines stating what was resolved, so the reader need not check it
 
     def groups(self) -> list[list[Fact]]:
         by_key: dict[str, list[Fact]] = {}
@@ -149,11 +150,17 @@ def _code_lines(src: Source) -> str:
     return '\n'.join(' ' * len(r) if re.match(r'\s*(//|#|\*|/\*)', r) else r for r in src.rows)
 
 
+_ENV_HINT = re.compile(r'environ|getenv|\benv\b')     # an opaque string that may hide an environment read
+
+
 def _env_scan(src: Source) -> tuple[str, list[bool], set[int], list[int]]:
     """Keep literal arguments, but distinguish expression positions from strings and comments.
 
-    This is lexical filtering, not a JavaScript parser. Template interpolations are explicitly unrecognised.
-    Python uses its standard tokenizer so triple-quoted strings and escaped quotes keep correct offsets.
+    This is lexical filtering, not a JavaScript parser. In a template literal the text parts are strings and every
+    ${...} is code, scanned like the rest (nested strings, templates and braces included).
+    Python uses its standard tokenizer so triple-quoted strings and escaped quotes keep correct offsets; from Python 3.12
+    the expressions of a formatted string are tokens of their own, before that the string is opaque and reported only
+    when it mentions the environment.
     """
     text, chars = src.text, list(src.text)
     code = [True] * len(text)
@@ -168,63 +175,85 @@ def _env_scan(src: Source) -> tuple[str, list[bool], set[int], list[int]]:
             starts.add(a)
 
     if src.path.endswith('.py'):
-        formatted: list[int] = []
         try:
             for token in tokenize.generate_tokens(io.StringIO(text).readline):
                 a = src.starts[min(token.start[0] - 1, len(src.starts) - 1)] + token.start[1]
                 b = src.starts[min(token.end[0] - 1, len(src.starts) - 1)] + token.end[1]
                 b = min(b, len(text))
                 kind = tokenize.tok_name[token.type]
-                if kind == 'FSTRING_START':     # Python 3.12+ splits formatted strings into several tokens
-                    formatted.append(a)
-                    uncertain.append(a)
-                elif kind == 'FSTRING_END' and formatted:
-                    hide(formatted.pop(), b)
+                if kind in ('FSTRING_START', 'FSTRING_MIDDLE', 'FSTRING_END'):     # Python 3.12+: the text parts only
+                    hide(a, b)
                 elif token.type in (tokenize.STRING, tokenize.COMMENT):
                     hide(a, b, token.type == tokenize.COMMENT)
-                    if token.type == tokenize.STRING and re.match(r'(?i)[rub]*f', token.string):
+                    if token.type == tokenize.STRING and re.match(r'(?i)[rub]*f', token.string) and _ENV_HINT.search(token.string):
                         uncertain.append(a)
                 elif token.type == tokenize.ERRORTOKEN and token.string.strip():
                     uncertain.append(a)
         except (tokenize.TokenError, IndentationError):
             uncertain.append(0)
-        for a in formatted:     # an unfinished formatted string is not executable code either
-            hide(a, len(text))
         return ''.join(chars), code, starts, uncertain
 
-    i = 0
-    while i < len(text):
-        c = text[i]
-        if text.startswith('//', i) or text.startswith('/*', i):
-            end = text.find('\n', i) if text.startswith('//', i) else text.find('*/', i + 2)
-            end = len(text) if end < 0 else end + (2 if text.startswith('/*', i) else 0)
-            hide(i, end, True)
-            i = end
-        elif c in '\'"`':
-            end = _skip_string(text, i)
-            hide(i, end)
-            if c == '`' and '${' in text[i:end]:
-                uncertain.append(i)
-            i = end
-        elif c == '/' and (not text[max(0, i - 128):i].strip() or re.search(r'(?:[=(:,\[!&|?{};]|\breturn|\bthrow)\s*$', text[max(0, i - 128):i])):
-            # A regex literal is data too. Escapes and character classes may contain slashes.
-            end, bracket = i + 1, False
-            while end < len(text) and text[end] != '\n':
-                if text[end] == '\\':
-                    end += 2
-                    continue
-                if text[end] == '/' and not bracket:
-                    end += 1
-                    while end < len(text) and text[end].isalpha():
+    def template(i: int) -> int:
+        """text[i] is a backtick: hide the text parts, scan each ${...} as code. Index just after the closing backtick."""
+        j, part = i + 1, i
+        while j < len(text):
+            if text[j] == '\\':
+                j += 2
+            elif text[j] == '`':
+                hide(part, j + 1)
+                return j + 1
+            elif text.startswith('${', j):
+                hide(part, j + 2)
+                j = scan(j + 2, interpolation=True)
+                part = j - 1        # the closing brace belongs to the next text part
+            else:
+                j += 1
+        hide(part, len(text))
+        return len(text)
+
+    def scan(i: int, interpolation: bool = False) -> int:
+        """Hide strings, comments and regex literals from text[i]. In an interpolation, stop after its closing brace."""
+        depth = 0
+        while i < len(text):
+            c = text[i]
+            if text.startswith('//', i) or text.startswith('/*', i):
+                end = text.find('\n', i) if text.startswith('//', i) else text.find('*/', i + 2)
+                end = len(text) if end < 0 else end + (2 if text.startswith('/*', i) else 0)
+                hide(i, end, True)
+                i = end
+            elif c in '\'"':
+                end = _skip_string(text, i)
+                hide(i, end)
+                i = end
+            elif c == '`':
+                i = template(i)
+            elif c == '/' and (not text[max(0, i - 128):i].strip() or re.search(r'(?:[=(:,\[!&|?{};]|\breturn|\bthrow)\s*$', text[max(0, i - 128):i])):
+                # A regex literal is data too. Escapes and character classes may contain slashes.
+                end, bracket = i + 1, False
+                while end < len(text) and text[end] != '\n':
+                    if text[end] == '\\':
+                        end += 2
+                        continue
+                    if text[end] == '/' and not bracket:
                         end += 1
-                    break
-                if text[end] in '[]':
-                    bracket = text[end] == '['
-                end += 1
-            hide(i, min(end, len(text)))
-            i = end
-        else:
-            i += 1
+                        while end < len(text) and text[end].isalpha():
+                            end += 1
+                        break
+                    if text[end] in '[]':
+                        bracket = text[end] == '['
+                    end += 1
+                hide(i, min(end, len(text)))
+                i = end
+            elif interpolation and c in '{}':
+                if c == '}' and depth == 0:
+                    return i + 1
+                depth += 1 if c == '{' else -1
+                i += 1
+            else:
+                i += 1
+        return i
+
+    scan(0)
     return ''.join(chars), code, starts, uncertain
 
 
@@ -433,10 +462,20 @@ def _deps_of(call: ast.Call) -> list[str]:
     return out
 
 
+def _prefix_of(call: ast.Call) -> str | None:
+    """The literal prefix= of a router or an inclusion; '' without one, None when it is computed."""
+    for kw in call.keywords:
+        if kw.arg == 'prefix':
+            return kw.value.value if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str) else None
+    return ''
+
+
 def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
     names = [n.strip() for n in re.split(r'[,|]', lacking) if n.strip()]
     scope = ('Python endpoint functions decorated with @x.get/post/put/patch/delete/route/api_route/websocket(path), with their full '
-             'signature, decorator dependencies and the dependencies of their router (APIRouter(dependencies=...), include_router(..., dependencies=...))')
+             'signature, decorator dependencies and the dependencies of their router (APIRouter(dependencies=...), include_router(..., dependencies=...)); '
+             'paths include the prefixes of APIRouter(prefix=...) and include_router(..., prefix=...) declared in the same file, '
+             'a prefix added in another file is not resolved')
     if names:
         scope += (f'; only endpoints whose decorator, signature and router dependencies mention none of {", ".join(names)} are listed. This is a '
                   f'textual property of the endpoints analysed here: it is not the same as "public" or "not logged in" (authentication can come from '
@@ -453,24 +492,52 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
         except SyntaxError as e:
             res.unrecognized.append((src.path, e.lineno or 1, 'file does not parse'))
     router_deps: dict[tuple[str, str], list[str]] = {}
+    own_prefix: dict[tuple[str, str], str] = {}
+    included_in: dict[tuple[str, str], tuple[str, str]] = {}     # child router -> (parent, prefix of the inclusion)
     for src, tree in trees:
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 if ast.unparse(node.value.func).split('.')[-1] in ('APIRouter', 'FastAPI', 'Blueprint'):
                     router_deps.setdefault((src.path, node.targets[0].id), []).extend(_deps_of(node.value))
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'include_router' and node.args:
-                deps = _deps_of(node)
-                if deps:
-                    target = node.args[0]
-                    if isinstance(target, ast.Name):
-                        local = any(isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == target.id for t in n.targets)
-                                    for n in tree.body)
-                        if local:
-                            router_deps.setdefault((src.path, target.id), []).extend(deps)
-                        else:
-                            res.unrecognized.append((src.path, node.lineno, f'include_router({target.id}, dependencies=...) is not defined in this file'))
+                    prefix = _prefix_of(node.value)
+                    if prefix is None:
+                        res.unrecognized.append((src.path, node.lineno, f'{node.targets[0].id} has a computed prefix: its endpoints are shown without it'))
                     else:
-                        res.unrecognized.append((src.path, node.lineno, f'include_router({ast.unparse(target)}, dependencies=...) cannot be linked to its endpoints'))
+                        own_prefix[(src.path, node.targets[0].id)] = prefix
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'include_router' and node.args:
+                deps, prefix, target = _deps_of(node), _prefix_of(node), node.args[0]
+                if not deps and prefix == '':
+                    continue
+                child = target.id if isinstance(target, ast.Name) else ''
+                local = bool(child) and any(
+                    isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == child for t in n.targets) for n in tree.body)
+                if not local:
+                    what = ', '.join(w for w, used in (('dependencies=...', deps), ('prefix=...', prefix != '')) if used)
+                    if child:
+                        reason = f'include_router({child}, {what}) is not defined in this file'
+                    else:
+                        reason = f'include_router({ast.unparse(target)}, {what}) cannot be linked to its endpoints'
+                    if prefix != '':
+                        reason += ': the full paths of its endpoints are not resolved here'
+                    res.unrecognized.append((src.path, node.lineno, reason))
+                    continue
+                router_deps.setdefault((src.path, child), []).extend(deps)
+                if prefix is None:
+                    res.unrecognized.append((src.path, node.lineno, f'include_router({child}, prefix=...) with a computed prefix: '
+                                                                    f'its endpoints are shown without it'))
+                elif prefix and isinstance(node.func.value, ast.Name):
+                    included_in[(src.path, child)] = (node.func.value.id, prefix)
+
+    def full_prefix(path: str, name: str, seen=()) -> str:
+        """FastAPI joins prefixes as written: parent router prefix + inclusion prefix + router prefix."""
+        if name in seen:
+            return own_prefix.get((path, name), '')
+        parent = included_in.get((path, name))
+        outer = full_prefix(path, parent[0], seen + (name,)) + parent[1] if parent else ''
+        return outer + own_prefix.get((path, name), '')
+
+    applied: dict[str, set[str]] = {}       # file with listed endpoints -> the router prefixes applied to them
+    declared: list[tuple[Fact, str, str]] = []
     for src, tree in trees:
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -498,11 +565,29 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                 if any(re.search(r'\b' + re.escape(n) + r'\b', blob) for n in names):
                     continue
                 detail = signature[:300]
+                prefix = full_prefix(src.path, recv)
                 if deco_deps:
                     detail += f' | decorator dependencies: {"; ".join(deco_deps)}'
                 if inherited:
                     detail += f' | router dependencies: {"; ".join(inherited)}'
-                res.facts.append(Fact(f'{method} {path} {node.name}', src.path, dec.lineno, node.lineno, detail, src.row(dec.lineno)))
+                res.facts.append(Fact(f'{method} {prefix}{path} {node.name}', src.path, dec.lineno, node.lineno, detail, src.row(dec.lineno)))
+                applied.setdefault(src.path, set()).update({prefix} if prefix else set())
+                declared.append((res.facts[-1], path, prefix))
+    for fact, path, prefix in declared:
+        if prefix and len(applied[fact.path]) > 1:     # one prefix per file is stated once, in the coverage line below
+            fact.detail += f' | declared path "{path}" under router prefix "{prefix}"'
+    # Questions often ask for full paths: say which prefixes were applied, so the reader need not open each router.
+    unresolved = sum('prefix' in why for _, _, why in res.unrecognized)
+    unresolved_note = f' {unresolved} prefix{"es" if unresolved > 1 else ""} not resolved (see Not recognized).' if unresolved else ''
+    with_prefix = [p + ' ' + ', '.join(f'"{x}"' for x in sorted(v)) for p, v in applied.items() if v]
+    without = [p for p, v in applied.items() if not v]
+    if with_prefix:
+        res.coverage.append(f'Router prefixes applied: {"; ".join(with_prefix)}' + (f'; none in {", ".join(without)}' if without else '')
+                            + '.' + unresolved_note)
+    elif unresolved:
+        res.coverage.append('Router prefixes:' + unresolved_note)
+    elif applied:
+        res.coverage.append('No router prefix is declared in these files.')
     return res
 
 

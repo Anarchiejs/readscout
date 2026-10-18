@@ -49,7 +49,7 @@ def test_digest_is_deterministic_for_a_simple_log(tmp_path, monkeypatch):
     text = tasks.digest('build.log')
     assert 'deterministic, no model' in text and 'status: complete' in text
     assert 'build.log:2 x3, last at line 5' in text and 'distinct values' in text and 'db-2' in text
-    assert 'ends build.log:9' in text and 'ValueError: bad input' in text           # the trace is one unit
+    assert '\n    build.log:7 ' in text and '\n    build.log:9 « ValueError: bad input »' in text    # the short trace is one unit, shown whole
     assert 'no cause is inferred' in text and 'Final lines:' in text and 'Kept 7 event line(s)' in text
 
 

@@ -26,9 +26,9 @@ Leave `quality` unset. Relative paths start at your working folder; folders are 
 
 ## Reading the answer
 
-- Each finding has a quote verified verbatim in the source and its real `path:line`. The sentence next to it is the small model's: trust the quote, not the interpretation. Before a decision, open only the cited lines.
-- The receipt header ends with `status: complete | partial | undetermined`. When `partial`, check only what the receipt says is missing or not recognized, with a targeted `grep`. Otherwise do not search again: open the cited lines (`sed -n 'a,bp'`), never a broad pattern such as `timeout`, `ERROR` or `503`.
-- Depth of checking: a location needs none, an extraction a sample of cited lines, a security or money decision every cited line.
+- Each finding has a quote verified verbatim in the source and its real `path:line`. The sentence next to it is the small model's: trust the quote, not the interpretation.
+- The receipt header ends with `status: complete | partial | undetermined`. When `partial`, check only what the receipt says is missing or not recognized, with a targeted `grep`. Otherwise do not search again: no broad pattern such as `timeout`, `ERROR` or `503`.
+- Depth of checking: a location or a complete deterministic receipt (`no model`) needs none, its quotes are the source lines; a model's sentence the cited lines when your conclusion rests on it; a security or money decision every cited line.
 - `undetermined`, "No verifiable finding" or an error: ask at most once more with a narrower question, then do it yourself. See `references/troubleshooting.md`.
 - Group independent reads in one shell call.
 - Calls are synchronous and the first one may take up to a minute: wait, do not cancel or repeat.

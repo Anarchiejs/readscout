@@ -9,7 +9,14 @@
 - Local release candidate, not published. Includes the deterministic reading work committed after 0.1.6 and the baseline audit fixes.
 - Restore edits when a check cannot start, raises unexpectedly or is cancelled. Preserve CRLF and the existing concurrent-change safeguards.
 - Never stop a loading llama.cpp model through the idle watchdog. Refuse a model switch while the shared server is busy or loading; unknown slot state is treated as busy. A session exiting leaves another session's request running.
-- Scope Python router dependencies by file and report unresolved external routers. Environment extraction ignores strings and inline/block comments; unsupported template/formatted expressions are reported instead of inferred.
+- Scope Python router dependencies by file and report unresolved external routers. Environment extraction ignores strings and inline/block comments.
+- Read the `${...}` interpolations of JavaScript templates and, from Python 3.12, the expressions of formatted strings as code: environment reads inside them are found instead of making the receipt partial. Before 3.12 a formatted string is reported only when it mentions the environment.
+- Endpoint paths include the `APIRouter(prefix=...)` and `include_router(..., prefix=...)` prefixes declared in the same file; computed prefixes and prefixes added from another file are reported as not resolved.
+- MCP tools return their receipt once, as text, without a structured copy of the same text.
+- Receipts say what the agent may do with them: a complete deterministic receipt is answered from without re-reading, a partial one names the only lines to check, a complete model receipt reminds that its sentences are not proof. The tool descriptions carry the same contract, in a smaller catalog (3 452 characters instead of 3 680), and the skill's checking rule matches it.
+- The endpoint receipt states which router prefixes were applied in each file. Same-file extra locations are line numbers only and the default "read" detail is not repeated, because a receipt is resent with every later request.
+- In a log that has error-level events, values or trace lines omitted from warning and info events are listed without making the digest partial.
+- A log digest whose focus asks what failed stays deterministic when the log is simple, error-level events are counted from the level field, short error traces are shown whole, and a partial digest names the lines it did not show. A model digest that leaves error-level events uncited is partial and lists them.
 - Preserve long log traces for filtering, flag omitted variants/trace excerpts and truncated lines as partial, and normalize ISO timestamps correctly.
 - Enforce input limits on real bytes before redaction/truncation, including UTF-8 and CRLF. Keep actual bytes in reading metrics.
 - Ignore malformed metric rows and show setup action errors instead of false success messages.

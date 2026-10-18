@@ -14,6 +14,11 @@ TIMESTAMP = re.compile(r'^\s*[\[(]?(?:\d{4}-\d\d-\d\d[T ]|\d\d/\w{3}/\d{4}:)?\d\
 DATE_ONLY = re.compile(r'^\s*[\[(]?\d{4}-\d\d-\d\d[\])]?\s*')
 VALUE = re.compile(r'[\w.:/@-]*\d[\w.:/@-]*')
 MAX_VARIANTS = 6
+# The level field, in capitals near the start of the line (after the timestamp) or as level=...: words in the message do not count.
+LEVEL = re.compile(r'(?<![\w.-])(TRACE|DEBUG|FINE|INFO|NOTICE|WARN|WARNING|ERROR|ERR|FATAL|CRITICAL|CRIT|PANIC|SEVERE|ALERT|EMERG)(?![\w.-])'
+                   r'|\blevel=["\']?(\w+)', re.I)
+SEVERE = {'ERROR', 'ERR', 'FATAL', 'CRITICAL', 'CRIT', 'PANIC', 'SEVERE', 'ALERT', 'EMERG'}
+SEVERE_WORDS = re.compile(r'(?i)\b(error|exception|traceback|fatal|panic)\b')
 
 
 @dataclass
@@ -35,6 +40,16 @@ def shape(text: str) -> str:
     body = _strip_time(text).strip().lower()
     body = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|0x[0-9a-f]+|\d+', '#', body)
     return re.sub(r'\s+', ' ', body)
+
+
+def is_error(text: str) -> bool:
+    """Error level: read from the level field when the line has one, from the wording otherwise."""
+    head = _strip_time(text)[:48]
+    for m in LEVEL.finditer(head):
+        if m.group(1) and not m.group(1).isupper():
+            continue        # "error" written in lower case is a word of the message, not the level field
+        return (m.group(1) or m.group(2)).upper() in SEVERE
+    return bool(SEVERE_WORDS.search(text))
 
 
 def _continues(text: str) -> bool:
