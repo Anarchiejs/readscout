@@ -322,6 +322,35 @@ def _quote(q: str) -> str:
     return f'« {one[:MAX_QUOTE_SHOWN]} » (fragment of {len(one)} characters)'
 
 
+MAX_FACT_QUOTE = 120          # an extracted fact on a longer line is quoted by the part of the line around it
+
+
+def _fact_quote(cite: str, key: str) -> str:
+    """Quote of an extracted fact: the whole line when short, otherwise a contiguous part of it around the fact, so that the
+    reader can cite the fact without opening the file again. The fragment is copied from the line, never rewritten."""
+    one = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', cite)
+    if len(one) <= MAX_FACT_QUOTE:
+        return f'« {one} »'
+    start, at, size = 0, -1, 0
+    for anchor in [key] + sorted(key.split(), key=len, reverse=True):      # "GET /path name": the path is on the decorator line
+        at = one.find(anchor)
+        if at < 0:
+            continue
+        size = len(anchor)
+        if size > MAX_FACT_QUOTE:        # keep the end of a very long anchor, its most specific part
+            start = at + size - MAX_FACT_QUOTE
+        else:
+            start = at + size // 2 - MAX_FACT_QUOTE // 2
+        break
+    start = max(0, min(len(one) - MAX_FACT_QUOTE, start))
+    # Start at a word boundary when one is close and the fact still fits: a quote that begins mid-word reads as an error.
+    if start and one[start - 1].isalnum():
+        nxt = next((i for i in range(start, min(start + 20, len(one))) if not one[i].isalnum()), None)
+        if nxt is not None and (at < 0 or nxt + 1 <= at):
+            start = nxt + 1
+    return f'« {one[start:start + MAX_FACT_QUOTE].strip()} » (fragment of the {len(one)}-character line)'
+
+
 MAX_RECEIPT_CHARS = 12000     # the receipt is bounded: what does not fit is counted, never silently dropped
 
 
@@ -430,7 +459,7 @@ def extract_receipt(res: 'extract.Result', nbytes: int, max_items: int, label: s
             where = ', '.join(str(f.line) if f.path == first.path else f'{f.path}:{f.line}' for f in g[1:6])
             more = f' (+{len(g) - 1} more: {where}{", ..." if len(g) > 6 else ""})'
         detail = '' if first.detail == 'read' else f' | {first.detail}'
-        row = f'- {loc} | {first.key}{more}{detail} | {_quote(first.cite)}'
+        row = f'- {loc} | {first.key}{more}{detail} | {_fact_quote(first.cite, first.key)}'
         if shown and size + len(row) > MAX_RECEIPT_CHARS:
             break
         lines.append(row)
