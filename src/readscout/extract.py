@@ -36,6 +36,8 @@ class Result:
     inspected: int = 0          # units the extractor recognized before any filter: 0 means "nothing of this kind was seen"
     status: str = ''            # set by the receipt, recorded in the metrics: one computation, never two
     coverage: list = field(default_factory=list)     # lines stating what was resolved, so the reader need not check it
+    # path -> (source rows, [(first, last, is_header)]): the lines a check of the listed items reads, shown by the receipt
+    excerpts: dict = field(default_factory=dict)
 
     def groups(self) -> list[list[Fact]]:
         by_key: dict[str, list[Fact]] = {}
@@ -462,6 +464,19 @@ def _deps_of(call: ast.Call) -> list[str]:
     return out
 
 
+def _header_blocks(tree: ast.Module) -> list[tuple[int, int, bool]]:
+    """Imports, router declarations and include_router calls of a module: where its protections come from."""
+    blocks = []
+    for node in tree.body:
+        router = (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                  and ast.unparse(node.value.func).split('.')[-1] in ('APIRouter', 'FastAPI', 'Blueprint'))
+        include = (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                   and node.value.func.attr == 'include_router')
+        if isinstance(node, (ast.Import, ast.ImportFrom)) or router or include:
+            blocks.append((node.lineno, node.end_lineno or node.lineno, True))
+    return blocks
+
+
 def _prefix_of(call: ast.Call) -> str | None:
     """The literal prefix= of a router or an inclusion; '' without one, None when it is computed."""
     for kw in call.keywords:
@@ -573,6 +588,9 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                 res.facts.append(Fact(f'{method} {prefix}{path} {node.name}', src.path, dec.lineno, node.lineno, detail, src.row(dec.lineno)))
                 applied.setdefault(src.path, set()).update({prefix} if prefix else set())
                 declared.append((res.facts[-1], path, prefix))
+                if names:       # a filtered list answers a protection question: keep what checking it reads
+                    _, blocks = res.excerpts.setdefault(src.path, (src.rows, _header_blocks(tree)))
+                    blocks.append((min(d.lineno for d in node.decorator_list), node.end_lineno or node.lineno, False))
     for fact, path, prefix in declared:
         if prefix and len(applied[fact.path]) > 1:     # one prefix per file is stated once, in the coverage line below
             fact.detail += f' | declared path "{path}" under router prefix "{prefix}"'

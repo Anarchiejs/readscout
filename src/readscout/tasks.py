@@ -379,6 +379,42 @@ def receipt(out: Outcome, model: Model, nbytes: int, max_items: int, label: str,
     return '\n'.join(lines)
 
 
+MAX_HANDLER_LINES = 25        # lines of one listed handler shown in a filtered receipt
+MAX_EXCERPT_CHARS = 8000      # all source excerpts of one receipt: what does not fit is named, never silently dropped
+
+
+def excerpt_section(excerpts: dict) -> list[str]:
+    """The source lines a protection check of the listed items reads, numbered as in the files, blank lines left out."""
+    if not excerpts:
+        return []
+    out = ['Source of the listed endpoints, for a protection check (lines as in the files, blank lines left out):']
+    size, left_out = 0, []
+    for path, (rows, blocks) in excerpts.items():
+        shown: set[int] = set()
+        part = [path]
+        for first, last, header in blocks:
+            numbers = [n for n in range(first, last + 1) if n not in shown and 0 < n <= len(rows) and rows[n - 1].strip()]
+            cut = numbers[MAX_HANDLER_LINES:] if not header else []
+            numbers = numbers if header else numbers[:MAX_HANDLER_LINES]
+            block = [f'  {n}| {rows[n - 1].rstrip()}' for n in numbers]
+            if cut:
+                block.append(f'  ({path}:{cut[0]}-{cut[-1]} of this handler not shown)')
+            cost = sum(len(b) + 1 for b in block)
+            if numbers and size + cost > MAX_EXCERPT_CHARS:
+                left_out.append(f'{path}:{first}-{last}')
+                continue
+            part += block
+            size += cost
+            shown.update(numbers)
+        if len(part) > 1:
+            out += part
+    if left_out:
+        out.append(f'Source not shown for: {", ".join(left_out)} (excerpt budget); read those lines if the check needs them.')
+    out.append('These are the lines a check of the listed endpoints reads: no re-read of them is needed. Still unknown: '
+               'authentication added outside these files (middleware, the application\'s include_router).')
+    return out
+
+
 def extract_receipt(res: 'extract.Result', nbytes: int, max_items: int, label: str) -> str:
     """One line per fact group: path:line | what | quote read from the file. The status is structural: it is partial exactly
     when a construct was seen that the extractor does not understand, and those places are listed."""
@@ -409,6 +445,7 @@ def extract_receipt(res: 'extract.Result', nbytes: int, max_items: int, label: s
         if len(res.unrecognized) > 15:
             lines.append(f'... {len(res.unrecognized) - 15} more')
     lines += res.coverage
+    lines += excerpt_section(res.excerpts)
     lines.append(f'Scope: {res.scope}.')
     if res.inspected == 0 and not res.unrecognized:
         # Nothing of this kind was seen at all: "complete and empty" would read as "there are none", which is not known.
@@ -451,6 +488,10 @@ def ask(files: list[str], question: str, mode='find', quality: bool | None = Non
             res = extract.run(extraction, lines)
         except ValueError as e:
             raise AccessError(str(e)) from e
+        if extraction == 'endpoints' and NEGATION.search(NOT_A_NEGATION.sub(' ', question)):
+            # The agent then filters the full list itself and re-reads the candidates: the filtered call brings their source.
+            res.coverage.append("For endpoints lacking a protection, extract='endpoints!Name1,Name2' lists only those, "
+                                'with the source lines a check reads.')
         text = extract_receipt(res, nbytes, max_items, f'local_ask extract={extraction}')
         record({'tool': 'ask', 'mode': 'extract', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
                 'verified': len(res.groups()), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': res.status})
