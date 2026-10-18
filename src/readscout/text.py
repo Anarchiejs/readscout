@@ -46,12 +46,22 @@ class AccessError(ValueError):
     pass
 
 
+class InputLimitError(AccessError):
+    """An input budget was exceeded; never silently skip it during directory traversal."""
+
+
 @dataclass
 class Line:
     path: str   # path as given by the caller (relative to its root when possible)
     no: int     # 1-based line number in the original file
     text: str
     cut: bool = False   # the line was longer than MAX_LINE_CHARS and its end is not shown to the model
+    source_bytes: int = 0  # actual input bytes, stored once on the first line of each loaded file
+
+
+def input_bytes(lines: list[Line]) -> int:
+    measured = sum(ln.source_bytes for ln in lines)
+    return measured if measured else sum(len(ln.text.encode('utf-8')) + 1 for ln in lines)
 
 
 def outside(real: Path, allowed: list[Path] | None) -> bool:
@@ -106,16 +116,24 @@ def is_sensitive(rel_parts, name: str) -> bool:
             or Path(name).suffix.lower() in SKIPPED_SUFFIXES or name.lower() in SKIPPED_NAMES)
 
 
-def load_lines(path: str, roots: list[Path], label: str | None = None, allowed: list[Path] | None = None) -> list[Line]:
+def load_lines(path: str, roots: list[Path], label: str | None = None, allowed: list[Path] | None = None,
+               *, max_bytes: int | None = None) -> list[Line]:
     real, shown = resolve(path, roots, allowed)
     shown = label or shown
     if real.stat().st_size > MAX_FILE_BYTES:
         raise AccessError(f'File larger than {MAX_FILE_BYTES // 1_000_000} MB: {path}')
-    raw = real.read_bytes()
+    limit = min(MAX_FILE_BYTES, max_bytes) if max_bytes is not None else MAX_FILE_BYTES
+    if real.stat().st_size > limit:
+        raise InputLimitError('Input byte budget exceeded; narrow the paths')
+    with real.open('rb') as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise InputLimitError('Input byte budget exceeded while reading; narrow the paths')
     if b'\0' in raw[:8192]:
         raise AccessError(f'Binary file refused: {path}')
     text = redact(raw.decode('utf-8', errors='replace'))
-    return [Line(shown, i, t if len(t) <= MAX_LINE_CHARS else t[:MAX_LINE_CHARS] + ' [line truncated]', len(t) > MAX_LINE_CHARS)
+    return [Line(shown, i, t if len(t) <= MAX_LINE_CHARS else t[:MAX_LINE_CHARS] + ' [line truncated]', len(t) > MAX_LINE_CHARS,
+                 len(raw) if i == 1 else 0)
             for i, t in enumerate(text.splitlines(), 1)]
 
 

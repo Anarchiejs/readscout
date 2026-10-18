@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- 0.1.7 is prepared locally; no new release has been published.
+
+## 0.1.7
+
+- Local release candidate, not published. Includes the deterministic reading work committed after 0.1.6 and the baseline audit fixes.
+- Restore edits when a check cannot start, raises unexpectedly or is cancelled. Preserve CRLF and the existing concurrent-change safeguards.
+- Never stop a loading llama.cpp model through the idle watchdog. Refuse a model switch while the shared server is busy or loading; unknown slot state is treated as busy. A session exiting leaves another session's request running.
+- Scope Python router dependencies by file and report unresolved external routers. Environment extraction ignores strings and inline/block comments; unsupported template/formatted expressions are reported instead of inferred.
+- Preserve long log traces for filtering, flag omitted variants/trace excerpts and truncated lines as partial, and normalize ISO timestamps correctly.
+- Enforce input limits on real bytes before redaction/truncation, including UTF-8 and CRLF. Keep actual bytes in reading metrics.
+- Ignore malformed metric rows and show setup action errors instead of false success messages.
+- Register the MCP server from the current Python environment, check all installed skill references, and expose offline package identity with `readscout info`.
+- Deterministic environment, routes, endpoints and Supabase inventories; statused receipts; bounded output and model-free simple log grouping. Skill core shortened with supporting references. Local-text estimates remain distinct from measured agent savings.
+
 - Clarify the CLI/dashboard local-text estimate after the campaign. It is not measured agent savings;
   the estimate formula and delegation rules are unchanged, and all recorded runs predate this wording change.
 

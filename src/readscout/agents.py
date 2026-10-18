@@ -28,8 +28,8 @@ def gate_notice() -> str:
 
 def server_command() -> list[str]:
     """How an agent should start the MCP server: the installed entry point, else this interpreter."""
-    exe = shutil.which('readscout-mcp')
-    return [exe] if exe else [sys.executable, '-m', 'readscout.server']
+    exe = Path(sys.executable).parent / ('readscout-mcp.exe' if sys.platform == 'win32' else 'readscout-mcp')
+    return [str(exe)] if exe.is_file() else [sys.executable, '-m', 'readscout.server']
 
 
 def _run(cmd):
@@ -45,11 +45,20 @@ def _copy_skill(dest: Path):
         shutil.copytree(refs, dest.parent / 'references', dirs_exist_ok=True)
 
 
+def _skill_matches(dest: Path) -> bool:
+    """The core and every shipped reference must match; checking only SKILL.md misses stale references."""
+    try:
+        return all((dest.parent / p.relative_to(SKILL.parent)).read_bytes() == p.read_bytes()
+                   for p in SKILL.parent.rglob('*.md'))
+    except OSError:
+        return False
+
+
 def status() -> dict:
     claude = shutil.which('claude')
-    out = {'claude_cli': bool(claude), 'claude_mcp': False, 'claude_plugin': False, 'claude_skill': CLAUDE_SKILL.exists() and CLAUDE_SKILL.read_bytes() == SKILL.read_bytes(),
+    out = {'claude_cli': bool(claude), 'claude_mcp': False, 'claude_plugin': False, 'claude_skill': _skill_matches(CLAUDE_SKILL),
            'codex_config': CODEX_CONFIG.exists(), 'codex_mcp': False,
-           'codex_skill': CODEX_SKILL.exists() and CODEX_SKILL.read_bytes() == SKILL.read_bytes()}
+           'codex_skill': _skill_matches(CODEX_SKILL)}
     if claude:
         out['claude_mcp'] = 'readscout' in _run([claude, 'mcp', 'get', 'readscout']).stdout
         # Installed as a Claude Code plugin: the plugin brings its own MCP server and skill.

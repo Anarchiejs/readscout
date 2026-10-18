@@ -63,6 +63,8 @@ def _run_gate(gate, cwd, timeout):
                                creationflags=NO_WINDOW, encoding='utf-8', errors='replace')
         except FileNotFoundError:
             return False, f'Gate command not found: {cmd[0]}'
+        except OSError as e:
+            return False, f'Gate command could not start: {cmd[0]} ({e})'
         except subprocess.TimeoutExpired:
             return False, f'Gate timed out after {timeout}s: {" ".join(cmd)}'
         if p.returncode != 0:
@@ -263,12 +265,16 @@ def edit(files: list[str], instruction: str, gate: list[list[str]] | None = None
                     're-read it and retry or do it yourself.')
         try:
             tx.write(current, original)
+            ok, gate_out = _run_gate(gate, project, timeout) if gate else (True, 'no gate configured')
         except OSError as e:
             left = tx.restore()
             finish('write_error', attempts)
             return (f'ESCALATE · could not write the files ({str(e)[:150]}) · changes undone'
                     + (f' except {", ".join(left)} (modified by someone else)' if left else '') + ' · do it yourself.')
-        ok, gate_out = _run_gate(gate, project, timeout) if gate else (True, 'no gate configured')
+        except BaseException:
+            # Cancellation or an unexpected gate failure must not keep unvalidated writes.
+            tx.restore()
+            raise
         if ok:
             diff, plus, minus = _diff(targets, original, current)
             finish('applied', attempts, plus=plus, minus=minus, gate=bool(gate))

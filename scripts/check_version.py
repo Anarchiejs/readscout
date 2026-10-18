@@ -4,16 +4,34 @@ usage: python scripts/check_version.py [vX.Y.Z]     (the tag, when releasing: it
 """
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def changed_release(version: str) -> bool:
+    """A known local release tag must not identify different source contents. No network access."""
+    try:
+        exists = subprocess.run(['git', 'rev-parse', '--verify', f'refs/tags/v{version}'], cwd=ROOT,
+                                capture_output=True, timeout=5)
+        if exists.returncode:
+            return False
+        diff = subprocess.run(['git', 'diff', '--quiet', f'refs/tags/v{version}', '--',
+                               'src/readscout', 'pyproject.toml', '.claude-plugin/plugin.json'],
+                              cwd=ROOT, capture_output=True, timeout=5)
+        return diff.returncode == 1
+    except (OSError, subprocess.TimeoutExpired):
+        return False     # source archives can be checked without Git installed
+
+
 def main(tag: str | None) -> int:
     version = re.search(r"__version__ = '([^']+)'", (ROOT / 'src/readscout/__init__.py').read_text(encoding='utf-8'))[1]
     wheel = f'releases/download/v{version}/readscout-{version}-py3-none-any.whl'
     problems = []
+    if changed_release(version):
+        problems.append(f'sources differ from the existing v{version} release tag; use a new version')
     if tag and tag != f'v{version}':
         problems.append(f'tag {tag} does not match the package version {version}')
     plugin = json.loads((ROOT / '.claude-plugin/plugin.json').read_text(encoding='utf-8'))

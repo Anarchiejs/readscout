@@ -205,7 +205,7 @@ def _busy(url: str) -> bool:
         with _request(url.rstrip('/') + '/slots', timeout=3) as r:
             return any(s.get('is_processing') for s in json.load(r))
     except (BackendError, ValueError, TypeError, AttributeError):
-        return False
+        return True     # cannot establish that the server is idle: do not interrupt another session
 
 
 def _key(m: Model) -> str:
@@ -295,6 +295,11 @@ def ensure(m: Model, cfg: dict) -> str:
             pass                         # already serving this model, or loading it for another process
         else:
             if st:
+                url = f'http://127.0.0.1:{st["port"]}'
+                status = probe(url)
+                if status == 'loading' or (status == 'ok' and _busy(url)):
+                    raise BackendError('The shared llama.cpp server is loading or answering another request; '
+                                       'retry this model change after it finishes. Nothing was stopped.')
                 _stop(st)                # one model at a time, like Ollama with OLLAMA_MAX_LOADED_MODELS=1
             _free_ollama(cfg)
             port = _free_port()
@@ -351,10 +356,11 @@ def idle_check(idle: int) -> bool:
         if not st:
             return False
         url = f'http://127.0.0.1:{st["port"]}'
-        if not probe(url):
+        status = probe(url)
+        if not status:
             _write_state(None)           # it died or was stopped: forget it
             return False
-        if time.time() - st.get('last_used', 0) < idle or _busy(url):
+        if status == 'loading' or time.time() - st.get('last_used', 0) < idle or _busy(url):
             return False
         _stop(st)
         _write_state(None)
@@ -398,6 +404,12 @@ def stop_owned() -> None:
         with paths.config_lock(name='llamacpp', timeout=3):
             st = _read_state()
             if st and st.get('pid') == _OWN.get('pid'):
+                url = f'http://127.0.0.1:{st["port"]}'
+                status = probe(url)
+                if status == 'loading' or (status == 'ok' and _busy(url)):
+                    # A surviving session owns the active request; its watchdog will handle the idle server.
+                    _OWN.clear()
+                    return
                 _stop(st)
                 _write_state(None)
     except (OSError, TimeoutError):

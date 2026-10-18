@@ -16,7 +16,7 @@ from pathlib import Path
 
 from . import extract, llamacpp, logs, paths
 from .backend import UNLOAD_AFTER, BackendError, Model, chat, ensure_ollama, installed_models
-from .text import AccessError, Line, chunk, exact_text, is_sensitive, load_lines, locate, outside, render, resolve
+from .text import AccessError, InputLimitError, Line, chunk, exact_text, input_bytes, is_sensitive, load_lines, locate, outside, render, resolve
 
 TEXT_SUFFIXES = {'.py', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.json', '.md', '.txt', '.yml', '.yaml', '.toml', '.ini',
                  '.cfg', '.sql', '.lua', '.luau', '.rs', '.go', '.java', '.kt', '.cs', '.c', '.h', '.cpp', '.hpp', '.css',
@@ -105,12 +105,14 @@ def gather(given, roots, allowed=None):
         if len(owners[shown]) > 1:      # same relative path in two projects: say which one
             label = f'{(project_of(real, roots) or real.parent).name}/{shown}'
         try:
-            got = load_lines(p, roots, label, allowed)
+            got = load_lines(p, roots, label, allowed, max_bytes=MAX_TOTAL_BYTES - total)
+        except InputLimitError:
+            raise
         except AccessError:
             if p in explicit:
                 raise
             continue
-        total += sum(len(l.text) + 1 for l in got)
+        total += input_bytes(got)
         if total > MAX_TOTAL_BYTES:
             raise AccessError(f'More than {MAX_TOTAL_BYTES // 1000} KB requested; narrow the paths')
         lines += got
@@ -436,7 +438,7 @@ def pick_tier(question: str, quality: bool | None) -> str:
 def ask(files: list[str], question: str, mode='find', quality: bool | None = None, max_items=40, extraction: str = '') -> str:
     cfg, roots = load_config()
     lines = gather(files, roots, paths.allowed_folders(cfg))
-    nbytes = sum(len(l.text) + 1 for l in lines)
+    nbytes = input_bytes(lines)
     if extraction:
         # Deterministic: syntax finds the facts, no model is started, and what it does not understand is listed.
         try:
@@ -492,6 +494,8 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int)
             f'{events} occurrence(s) in {len(lines)} lines · quotes are lines read from the file · status: STATUS]')
     out = [head, 'Chronological order of first occurrence. The first event is not necessarily the cause: no cause is inferred here.']
     size = len(head)
+    visible = {(ln.path, ln.no) for ln in lines[:HEAD_LINES] + lines[-TAIL_LINES:]}
+    excerpt_loss = any(ln.cut for ln in lines)
     for g in groups[:max_items]:
         first = g.first[0]
         times = f' x{g.count}, last at line {g.last_start.no}' if g.count > 1 else ''
@@ -504,19 +508,24 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int)
             break
         out.append(row)
         size += len(row) + 1
+        visible.update((ln.path, ln.no) for ln in (g.first[0], g.first[-1]))
     shown = len(out) - 2
     if shown < len(groups):
         out.append(f'... {len(groups) - shown} more distinct event(s) not shown (raise max_items).')
     for title, chunk_ in (('First lines', lines[:HEAD_LINES]), ('Final lines', lines[-TAIL_LINES:])):
         out.append(f'{title}:')
         out += [f'- {ln.path}:{ln.no} | {_quote(ln.text.strip()[:MAX_QUOTE_SHOWN])}' for ln in chunk_ if ln.text.strip()]
+    excerpt_loss |= any(g.variants_omitted or any((ln.path, ln.no) not in visible for ln in g.first) for g in groups)
+    excerpt_loss |= any(len(ln.text.strip()) > MAX_QUOTE_SHOWN for ln in lines if (ln.path, ln.no) in visible)
     out.append(f'Kept {in_events} event line(s) in {len(groups)} group(s); the other {len(lines) - in_events} line(s) have no error-like wording and were not listed.')
     if not groups:
         status = 'undetermined'
         out.append('No error-like line matched (error, exception, fatal, failed, timeout, warn...): this does not prove the run was fine, '
                    'read the final lines above.')
     else:
-        status = 'partial' if shown < len(groups) else 'complete'
+        status = 'partial' if shown < len(groups) or excerpt_loss else 'complete'
+        if excerpt_loss:
+            out.append('Some trace lines, distinct values or long-line content are not shown; read the source for the full event.')
     out[0] = head.replace('STATUS', status)
     return '\n'.join(out), status
 
@@ -524,7 +533,7 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int)
 def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     cfg, roots = load_config()
     lines = load_lines(path, roots, allowed=paths.allowed_folders(cfg))
-    nbytes = sum(len(l.text) + 1 for l in lines)
+    nbytes = input_bytes(lines)
     groups = logs.group_events(lines)
     if not focus and len(groups) <= DETERMINISTIC_MAX_GROUPS:
         text, status = digest_receipt(lines, groups, nbytes, max_items)

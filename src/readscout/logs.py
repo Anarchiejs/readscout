@@ -13,7 +13,6 @@ ERROR_LINE = re.compile(r'(?i)\b(error|err!|exception|traceback|fatal|fail(ed|ur
 TIMESTAMP = re.compile(r'^\s*[\[(]?(?:\d{4}-\d\d-\d\d[T ]|\d\d/\w{3}/\d{4}:)?\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?[\])]?\s*')
 DATE_ONLY = re.compile(r'^\s*[\[(]?\d{4}-\d\d-\d\d[\])]?\s*')
 VALUE = re.compile(r'[\w.:/@-]*\d[\w.:/@-]*')
-MAX_UNIT_LINES = 40
 MAX_VARIANTS = 6
 
 
@@ -24,10 +23,12 @@ class Group:
     last_start: Line                    # where the last occurrence starts
     count: int = 1
     variants: list = field(default_factory=list)
+    variants_omitted: bool = False
 
 
 def _strip_time(text: str) -> str:
-    return TIMESTAMP.sub('', DATE_ONLY.sub('', text, count=1), count=1)
+    without_time = TIMESTAMP.sub('', text, count=1)
+    return without_time if without_time != text else DATE_ONLY.sub('', text, count=1)
 
 
 def shape(text: str) -> str:
@@ -49,7 +50,7 @@ def units(lines: list[Line]) -> list[list[Line]]:
             i += 1
             continue
         j = i + 1
-        while j < len(lines) and j - i < MAX_UNIT_LINES and lines[j].no == lines[j - 1].no + 1 and _continues(lines[j].text):
+        while j < len(lines) and lines[j].no == lines[j - 1].no + 1 and _continues(lines[j].text):
             j += 1
         if _strip_time(lines[i].text).lstrip().startswith('Traceback') and j < len(lines) and lines[j].no == lines[j - 1].no + 1 and not _continues(lines[j].text):
             j += 1          # the exception line that ends a Python traceback is not indented
@@ -70,8 +71,11 @@ def group_events(lines: list[Line]) -> list[Group]:
             g.count += 1
             g.last_start = unit[0]
         for v in values:
-            if v not in g.variants and len(g.variants) < MAX_VARIANTS:
-                g.variants.append(v)
+            if v not in g.variants:
+                if len(g.variants) < MAX_VARIANTS:
+                    g.variants.append(v)
+                else:
+                    g.variants_omitted = True
     return list(groups.values())
 
 

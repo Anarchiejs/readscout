@@ -66,8 +66,8 @@ const TOKEN='__TOKEN__';let S=null,timer=null,dirty=false;
 const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n).toLocaleString();
 function toast(t){const m=$('msg');m.textContent=t;m.style.display='block';clearTimeout(m._t);m._t=setTimeout(()=>m.style.display='none',6000)}
-async function post(u,b){try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Readscout-Token':TOKEN},body:JSON.stringify(b)});const j=await r.json().catch(()=>({}));if(!r.ok)return{message:'Error: '+(j.error||r.status)};return j}catch(e){return{message:'Error: the local readscout server did not answer.'}}}
-function applyEnv(){if(confirm('Save these Ollama settings as permanent user environment variables? They also apply to your other uses of Ollama.'))post('/api/ollama-env',{}).then(r=>toast(r.message))}
+async function post(u,b){try{const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json','X-Readscout-Token':TOKEN},body:JSON.stringify(b)});const j=await r.json();if(!r.ok){toast('Error: '+(j.error||r.status));return null}return j}catch(e){toast('Error: the local readscout server did not answer correctly.');return null}}
+function applyEnv(){if(confirm('Save these Ollama settings as permanent user environment variables? They also apply to your other uses of Ollama.'))post('/api/ollama-env',{}).then(r=>{if(r)toast(r.message)})}
 function show(v){for(const x of ['setup','usage']){$(x).style.display=x===v?'':'none';$('t-'+x).classList.toggle('on',x===v)}history.replaceState(null,'',v==='setup'?'/setup':'/')}
 async function load(){
   const q=dirty?`?vram=${$('vram').value}&ram=${$('ram').value}`:'';
@@ -114,9 +114,9 @@ function render(){
     .map(([k,v])=>`<div class="card"><div class="mut">${k}</div><div class="big">${v}</div></div>`).join('');
   $('recent').innerHTML='<tr><th>When</th><th>Tool</th><th>Model</th><th>Read</th><th>Verified / status</th><th>Dropped</th><th>Time</th></tr>'+(s.recent.map(r=>`<tr><td>${new Date(r.time*1000).toLocaleString()}</td><td>${esc(r.tool)}${r.mode&&r.mode!=='find'?' ('+esc(r.mode)+')':''}</td><td>${esc(r.model)}</td><td>${r.bytes_read?fmt(Math.round(r.bytes_read/1000))+' KB':''}</td><td>${esc(r.verified??r.status??'')}</td><td>${r.dropped??''}</td><td>${r.seconds??''} s</td></tr>`).join('')||'<tr><td colspan="7" class="mut">No call yet.</td></tr>');
 }
-function pull(m){post('/api/pull',{model:m}).then(()=>{toast('Downloading '+m);setTimeout(load,500)})}
-function useModels(){const r=S.recommended;post('/api/models',{fast:r.fast.model,quality:r.quality.model,vram:S.chosen.vram_gb,ram:S.chosen.ram_gb}).then(()=>{toast('Saved.');load()})}
-function agent(k,a){post('/api/agent',{agent:k,action:a}).then(r=>{toast(r.message);load()})}
+function pull(m){post('/api/pull',{model:m}).then(r=>{if(!r)return;toast('Downloading '+m);setTimeout(load,500)})}
+function useModels(){const r=S.recommended;post('/api/models',{fast:r.fast.model,quality:r.quality.model,vram:S.chosen.vram_gb,ram:S.chosen.ram_gb}).then(r=>{if(!r)return;toast('Saved.');load()})}
+function agent(k,a){post('/api/agent',{agent:k,action:a}).then(r=>{if(!r)return;toast(r.message);load()})}
 for(const id of ['vram','ram'])$(id).addEventListener('input',()=>{dirty=true;$('vv').textContent=$('vram').value;$('rv').textContent=$('ram').value;clearTimeout(window._d);window._d=setTimeout(load,250)});
 show('__VIEW__');load();
 </script>

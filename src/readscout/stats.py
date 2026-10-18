@@ -11,10 +11,22 @@ def rows(days=30) -> list[dict]:
         return []
     since = time.time() - days * 86400
     out = []
-    for line in p.read_text(encoding='utf-8').splitlines():
+    try:
+        content = p.read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return []
+    for line in content.splitlines():
         try:
             r = json.loads(line)
         except ValueError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        numeric = ('time', 'bytes_read', 'chars_returned', 'seconds', 'verified', 'dropped', 'plus', 'minus', 'attempts')
+        if any(not isinstance(r.get(k, 0), (int, float)) or isinstance(r.get(k, 0), bool)
+               or not 0 <= r.get(k, 0) <= 2**53 - 1 for k in numeric):
+            continue
+        if any(k in r and not isinstance(r[k], str) for k in ('model', 'tool', 'mode', 'status')):
             continue
         if r.get('time', 0) >= since:
             out.append(r)

@@ -1,5 +1,7 @@
 # readscout (français)
 
+Ce dépôt prépare **0.1.7 en local, sans publication**. Les liens de release de cette version deviendront disponibles après publication. Pour l'essayer maintenant : installer le wheel construit localement ou utiliser `uv tool install --force .`, puis réenregistrer les agents. `readscout info` affiche le chemin, les versions et l'empreinte du paquet sans démarrer de modèle.
+
 **Des modèles locaux lisent tes fichiers pour ton agent de code.** Quand Claude Code ou Codex a besoin d'informations
 dans de gros fichiers, un long journal ou un dossier entier, il demande à readscout au lieu de tout lire lui-même. Un
 petit modèle sur ta propre carte graphique lit les fichiers et répond en quelques lignes, et **chaque affirmation est
@@ -84,7 +86,7 @@ Le plugin apporte le skill et le serveur MCP (lancé par `uvx`, rien d'autre à 
 pour télécharger les modèles :
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.7/readscout-0.1.7-py3-none-any.whl readscout setup
 ```
 
 C'est la même page que pour l'option A : installe les modèles (la partie « Agents » est déjà faite par le
@@ -96,7 +98,7 @@ plugin). Redémarre Claude Code.
 # 1. Ollama : https://ollama.com/download (vérifie qu'il tourne)
 # 2. uv :     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.7/readscout-0.1.7-py3-none-any.whl
 # 4. modèles conseillés pour ta machine
 readscout pull
 # 5. connecter tes agents

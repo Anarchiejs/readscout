@@ -104,7 +104,9 @@ def test_endpoints_keep_decorator_signature_and_router_dependencies():
     assert 'router dependencies: [Depends(get_current_user)]' in by['GET /items items'].detail
     assert 'decorator dependencies: [Depends(rate_limit)]' in by['POST /signup signup'].detail
     assert by['GET /items items'].line == 7 and by['GET /items items'].cite == '@router.get("/items")'
-    assert len(res.unrecognized) == 1 and 'computed path' in res.unrecognized[0][2]
+    assert len(res.unrecognized) == 2
+    assert any('computed path' in reason for _, _, reason in res.unrecognized)
+    assert any('not defined in this file' in reason for _, _, reason in res.unrecognized)
 
 
 def test_endpoints_lacking_a_dependency_name_the_scope_and_use_router_dependencies():

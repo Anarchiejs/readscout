@@ -6,7 +6,9 @@ understand is reported (`Result.unrecognized`) instead of being guessed: the rec
 """
 import ast
 import bisect
+import io
 import re
+import tokenize
 from dataclasses import dataclass, field
 
 from .text import Line
@@ -147,6 +149,85 @@ def _code_lines(src: Source) -> str:
     return '\n'.join(' ' * len(r) if re.match(r'\s*(//|#|\*|/\*)', r) else r for r in src.rows)
 
 
+def _env_scan(src: Source) -> tuple[str, list[bool], set[int], list[int]]:
+    """Keep literal arguments, but distinguish expression positions from strings and comments.
+
+    This is lexical filtering, not a JavaScript parser. Template interpolations are explicitly unrecognised.
+    Python uses its standard tokenizer so triple-quoted strings and escaped quotes keep correct offsets.
+    """
+    text, chars = src.text, list(src.text)
+    code = [True] * len(text)
+    starts: set[int] = set()
+    uncertain: list[int] = []
+
+    def hide(a, b, comment=False):
+        code[a:b] = [False] * (b - a)
+        if comment:
+            chars[a:b] = ['\n' if c == '\n' else ' ' for c in text[a:b]]
+        else:
+            starts.add(a)
+
+    if src.path.endswith('.py'):
+        formatted: list[int] = []
+        try:
+            for token in tokenize.generate_tokens(io.StringIO(text).readline):
+                a = src.starts[min(token.start[0] - 1, len(src.starts) - 1)] + token.start[1]
+                b = src.starts[min(token.end[0] - 1, len(src.starts) - 1)] + token.end[1]
+                b = min(b, len(text))
+                kind = tokenize.tok_name[token.type]
+                if kind == 'FSTRING_START':     # Python 3.12+ splits formatted strings into several tokens
+                    formatted.append(a)
+                    uncertain.append(a)
+                elif kind == 'FSTRING_END' and formatted:
+                    hide(formatted.pop(), b)
+                elif token.type in (tokenize.STRING, tokenize.COMMENT):
+                    hide(a, b, token.type == tokenize.COMMENT)
+                    if token.type == tokenize.STRING and re.match(r'(?i)[rub]*f', token.string):
+                        uncertain.append(a)
+                elif token.type == tokenize.ERRORTOKEN and token.string.strip():
+                    uncertain.append(a)
+        except (tokenize.TokenError, IndentationError):
+            uncertain.append(0)
+        for a in formatted:     # an unfinished formatted string is not executable code either
+            hide(a, len(text))
+        return ''.join(chars), code, starts, uncertain
+
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if text.startswith('//', i) or text.startswith('/*', i):
+            end = text.find('\n', i) if text.startswith('//', i) else text.find('*/', i + 2)
+            end = len(text) if end < 0 else end + (2 if text.startswith('/*', i) else 0)
+            hide(i, end, True)
+            i = end
+        elif c in '\'"`':
+            end = _skip_string(text, i)
+            hide(i, end)
+            if c == '`' and '${' in text[i:end]:
+                uncertain.append(i)
+            i = end
+        elif c == '/' and (not text[max(0, i - 128):i].strip() or re.search(r'(?:[=(:,\[!&|?{};]|\breturn|\bthrow)\s*$', text[max(0, i - 128):i])):
+            # A regex literal is data too. Escapes and character classes may contain slashes.
+            end, bracket = i + 1, False
+            while end < len(text) and text[end] != '\n':
+                if text[end] == '\\':
+                    end += 2
+                    continue
+                if text[end] == '/' and not bracket:
+                    end += 1
+                    while end < len(text) and text[end].isalpha():
+                        end += 1
+                    break
+                if text[end] in '[]':
+                    bracket = text[end] == '['
+                end += 1
+            hide(i, min(end, len(text)))
+            i = end
+        else:
+            i += 1
+    return ''.join(chars), code, starts, uncertain
+
+
 # ---------------------------------------------------------------- environment variables
 
 _ENV_LITERAL = [
@@ -172,8 +253,9 @@ def extract_env(sources: list[Source]) -> Result:
                         '(direct, bracket, destructuring and simple alias forms), and UPPER_CASE keys declared in Joi.object / z.object '
                         'schemas or in pydantic BaseSettings classes (a variable validated but never read by name is listed too)')
     for src in sources:
-        text = _code_lines(src)
+        text, code, string_starts, uncertain = _env_scan(src)
         res.files += 1
+        res.unrecognized.extend((src.path, src.line_of(i), 'formatted/template string or invalid tokens not inspected') for i in uncertain)
 
         def add(name, offset, how):
             ln = src.line_of(offset)
@@ -181,29 +263,34 @@ def extract_env(sources: list[Source]) -> Result:
 
         for rx in _ENV_LITERAL:
             for m in rx.finditer(text):
-                add(_env_name(m), m.start(), 'read')
+                if code[m.start()]:
+                    add(_env_name(m), m.start(), 'read')
         for m in re.finditer(r'(?:const|let|var)\s*\{([^}]*)\}\s*=\s*process\.env\b', text):
+            if not code[m.start()]:
+                continue
             for part in m.group(1).split(','):
                 name = re.split(r'[:=]', part.strip())[0].strip()
                 if re.fullmatch(r'[A-Za-z_]\w*', name):
                     add(name, m.start(), 'destructured')
-        if re.search(r'from\s+os\s+import[^\n]*\b(?:environ|getenv)\b', text):
+        if any(code[m.start()] for m in re.finditer(r'from\s+os\s+import[^\n]*\b(?:environ|getenv)\b', text)):
             for rx in (re.compile(r'(?<![\w.])environ\[\s*([\'"])([^\'"]+)\1\s*\]'),
                        re.compile(r'(?<![\w.])environ\.get\(\s*([\'"])([^\'"]+)\1'),
                        re.compile(r'(?<![\w.])getenv\(\s*([\'"])([^\'"]+)\1')):
                 for m in rx.finditer(text):
-                    add(m.group(2), m.start(), 'read')
-        aliases = set(re.findall(r'(?:const|let|var)\s+(\w+)\s*=\s*process\.env\s*(?:;|\n|$)', text))
-        aliases |= set(re.findall(r'^\s*(\w+)\s*=\s*os\.environ\s*$', text, re.M))
+                    if code[m.start()]:
+                        add(m.group(2), m.start(), 'read')
+        aliases = {m.group(1) for m in re.finditer(r'(?:const|let|var)\s+(\w+)\s*=\s*process\.env\s*(?:;|\n|$)', text) if code[m.start()]}
+        aliases |= {m.group(1) for m in re.finditer(r'^\s*(\w+)\s*=\s*os\.environ\s*$', text, re.M) if code[m.start()]}
         for a in aliases:
             for m in re.finditer(r'(?<![\w.])' + re.escape(a) + r'(?:\.([A-Za-z_]\w*)|\[\s*([\'"])([^\'"]+)\2\s*\]|\.get\(\s*([\'"])([^\'"]+)\4)', text):
                 name = m.group(1) or m.group(3) or m.group(5)
-                if name not in ('get', 'items', 'keys', 'values', 'copy'):
+                if code[m.start()] and name not in ('get', 'items', 'keys', 'values', 'copy'):
                     add(name, m.start(), f'read through alias {a}')
         for rx in _ENV_DYNAMIC:
             for m in rx.finditer(text):
-                res.unrecognized.append((src.path, src.line_of(m.start()), 'environment variable read with a computed name'))
-        for offset, name in _schema_keys(text):
+                if code[m.start()]:
+                    res.unrecognized.append((src.path, src.line_of(m.start()), 'environment variable read with a computed name'))
+        for offset, name in _schema_keys(text, code, string_starts):
             add(name, offset, 'declared in a validation schema')
         if src.path.endswith('.py'):
             for ln, name in _settings_fields(src):
@@ -229,11 +316,11 @@ def _depth(text: str, a: int, b: int) -> int:
     return depth
 
 
-def _schema_keys(text: str):
+def _schema_keys(text: str, code: list[bool] | None = None, string_starts: set[int] | None = None):
     """(offset, NAME) of the top-level UPPER_CASE keys of Joi.object({...}), Joi.object().keys({...}) and z.object({...})."""
     inside = -1          # a schema nested in another one describes a sub-object, not environment variables
     for m in _SCHEMA_CALL.finditer(text):
-        if m.start() < inside:
+        if m.start() < inside or (code is not None and not code[m.start()]):
             continue
         end = call_end(text, m.end() - 1)
         if end < 0:
@@ -246,7 +333,7 @@ def _schema_keys(text: str):
             if brace < 0:
                 continue
             for k in _SCHEMA_KEY.finditer(text, brace, b):
-                if _depth(text, brace, k.start()) == 1:
+                if (code is None or code[k.start()] or k.start() in (string_starts or set())) and _depth(text, brace, k.start()) == 1:
                     yield k.start(), k.group(1)
 
 
@@ -365,18 +452,23 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
             trees.append((src, ast.parse(src.text)))
         except SyntaxError as e:
             res.unrecognized.append((src.path, e.lineno or 1, 'file does not parse'))
-    router_deps: dict[str, list[str]] = {}
+    router_deps: dict[tuple[str, str], list[str]] = {}
     for src, tree in trees:
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 if ast.unparse(node.value.func).split('.')[-1] in ('APIRouter', 'FastAPI', 'Blueprint'):
-                    router_deps.setdefault(node.targets[0].id, []).extend(_deps_of(node.value))
+                    router_deps.setdefault((src.path, node.targets[0].id), []).extend(_deps_of(node.value))
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'include_router' and node.args:
                 deps = _deps_of(node)
                 if deps:
                     target = node.args[0]
                     if isinstance(target, ast.Name):
-                        router_deps.setdefault(target.id, []).extend(deps)
+                        local = any(isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == target.id for t in n.targets)
+                                    for n in tree.body)
+                        if local:
+                            router_deps.setdefault((src.path, target.id), []).extend(deps)
+                        else:
+                            res.unrecognized.append((src.path, node.lineno, f'include_router({target.id}, dependencies=...) is not defined in this file'))
                     else:
                         res.unrecognized.append((src.path, node.lineno, f'include_router({ast.unparse(target)}, dependencies=...) cannot be linked to its endpoints'))
     for src, tree in trees:
@@ -400,7 +492,7 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                     method = method if method != 'ROUTE' else 'GET'
                 signature = f'{"async " if isinstance(node, ast.AsyncFunctionDef) else ""}def {node.name}({ast.unparse(node.args)})'
                 deco_deps = _deps_of(dec)
-                inherited = router_deps.get(recv, [])
+                inherited = router_deps.get((src.path, recv), [])
                 blob = ' '.join([ast.unparse(dec), signature] + inherited)
                 res.inspected += 1
                 if any(re.search(r'\b' + re.escape(n) + r'\b', blob) for n in names):

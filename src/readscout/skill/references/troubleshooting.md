@@ -12,3 +12,9 @@ Calls are synchronous. The first call after a pause loads a model (10 to 30 s fo
 ## Memory
 
 readscout frees the models by itself, whichever engine runs them: they unload one minute after the last call, and when your session ends. Do nothing to stop them, and do not check. If the user asks to free the memory right now, run `readscout stop`.
+
+When sessions share llama.cpp, an active request or a loading model is not stopped automatically. A request for another model fails with a retry message while that server is busy. An unavailable slots endpoint is treated as busy. Retry only after the other request finishes; do not kill or switch the server yourself.
+
+## Version and installation
+
+When the user asks to diagnose or update the installation, `readscout info` prints the source version, installed distribution version, package path and content fingerprint without starting a model. A source checkout is separate from the installed MCP package. After installing a tested wheel, run `readscout install-agent codex` and/or `readscout install-agent claude` to copy the core and every reference and register that environment's MCP server. Reconnect the clients afterwards: open sessions keep their loaded modules and skill text until restarted.

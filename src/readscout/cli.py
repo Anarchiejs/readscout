@@ -2,6 +2,7 @@
 
   readscout setup                       open the setup page (hardware, models, agents)
   readscout doctor                      check that everything is installed and wired
+  readscout info                        offline version, package path and content fingerprint (JSON)
   readscout hardware                    detected GPU/RAM and recommended models
   readscout pull [MODEL ...]            download models (default: the recommended ones)
   readscout install-agent claude|codex  register the MCP server and the skill (uninstall-agent to undo)
@@ -18,6 +19,7 @@
   readscout bench [--models A,B]        measure models on the public benchmark (report to share)
 """
 import argparse
+import json
 import shlex
 import subprocess
 import sys
@@ -273,6 +275,7 @@ def main(argv=None):
     p = sub.add_parser('serve-web')
     p.add_argument('--port', type=int, default=8765)
     sub.add_parser('doctor')
+    sub.add_parser('info')
     sub.add_parser('hardware')
     p = sub.add_parser('pull')
     p.add_argument('models', nargs='*')
@@ -314,6 +317,10 @@ def main(argv=None):
     p = sub.add_parser('warm')
     p.add_argument('tier', nargs='?', default='fast', choices=['fast', 'quality'])
     a = ap.parse_args(argv)
+    if a.cmd == 'info':
+        from .provenance import package_info
+        print(json.dumps(package_info(), indent=2))
+        return 0
     hardware.ensure_config()
 
     if a.cmd == 'setup':

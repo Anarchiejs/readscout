@@ -1,5 +1,7 @@
 # readscout
 
+Development checkout: 0.1.7 is a local candidate, not a published release. Its pinned release URLs become available after publication. For local testing, install the built wheel or use `uv tool install --force .`, then register your agents again. `readscout info` prints the loaded package identity without starting a model.
+
 [![CI](https://github.com/Anarchiejs/readscout/actions/workflows/ci.yml/badge.svg)](https://github.com/Anarchiejs/readscout/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -123,14 +125,14 @@ The plugin brings the skill and the MCP server (started with `uvx`, nothing else
 download the models:
 
 ```sh
-uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl readscout setup
+uvx --from https://github.com/Anarchiejs/readscout/releases/download/v0.1.7/readscout-0.1.7-py3-none-any.whl readscout setup
 ```
 
 That opens the same setup page as option A: install the models there (skip
 "Coding agents": the plugin already did it). Restart Claude Code.
 
 Tip: to have a short `readscout` command for later, install it once with
-`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl`.
+`uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.7/readscout-0.1.7-py3-none-any.whl`.
 
 ### Option C: manual install
 
@@ -138,7 +140,7 @@ Tip: to have a short `readscout` command for later, install it once with
 # 1. Ollama: https://ollama.com/download (then make sure it is running)
 # 2. uv:     https://docs.astral.sh/uv/getting-started/installation/
 # 3. readscout
-uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.6/readscout-0.1.6-py3-none-any.whl
+uv tool install https://github.com/Anarchiejs/readscout/releases/download/v0.1.7/readscout-0.1.7-py3-none-any.whl
 
 # 4. models recommended for your machine (see `readscout hardware` first if you are curious)
 readscout pull

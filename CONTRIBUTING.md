@@ -37,6 +37,12 @@ manifest and every pinned wheel URL: READMEs, `install.sh`, `install.ps1`, `.cla
 it too and fails on any stale URL), then push the tag `vX.Y.Z`: the Release workflow tests, builds the package and
 publishes the release with those notes and `SHA256SUMS`.
 
+Before updating an agent, build and test a wheel in isolation, run `readscout info` from that environment, then install
+that exact wheel and run `readscout install-agent codex` and/or `readscout install-agent claude`. Compare version,
+distribution version and content fingerprint with the tested build, and reconnect the clients. A checkout, a global
+installation and an already-running MCP process are three different states. Never reuse an already-tagged version for
+changed package contents; the version check also detects changed sources when that release tag is available locally.
+
 ## Commits
 
 One change per commit, with a subject that says what changed in the imperative, under 72 characters, and a body when
