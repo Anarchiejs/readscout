@@ -28,8 +28,9 @@ def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] 
     """Get facts from many or large files without reading them: pass paths (files or folders) and a question, never
     contents. Skip it when one grep or one short file answers. Each fact has its real path:line and a quote verified
     verbatim in the source; unquotable facts are dropped. mode='summary' adds an unverified summary; leave quality unset.
-    extract (exact, no model) env | routes | endpoints | supabase lists every item of that kind, filtering is yours;
-    'endpoints!A,B' = Python endpoints mentioning neither A nor B (textual, not proof that they are public).
+    Use it instead of reading route files: extract=endpoints lists the routes or endpoints of a folder, 'endpoints!A,B' those
+    lacking A and B, without auth (textual, not proof). extract (exact, no model) env | routes | endpoints | supabase lists
+    every item of that kind, filtering is yours.
     Header status: complete = answer from the receipt, no re-read (a model's sentence is not proof: open the cited
     lines before a security or correctness decision); partial = check only what it lists; undetermined = do it yourself."""
     return _safe(tasks.ask, paths, question, mode, quality, max_items, extract)
@@ -37,7 +38,7 @@ def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] 
 
 @mcp.tool(annotations=READ, structured_output=False)
 def local_digest(path: str, focus: str = '') -> str:
-    """Triage a long log or command output saved to a file (redirect a noisy command first) without loading it:
+    """Use this instead of reading or grepping a long log or command output (redirect a noisy command to a file first):
     every error-like event with path:line, short traces whole, the final lines; a model only for a varied log or a
     focus that is not about failures. Status: complete = cite from the receipt, no re-read; partial = read only the
     lines it names."""

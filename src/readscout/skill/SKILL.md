@@ -1,6 +1,6 @@
 ---
 name: readscout
-description: Local models (nothing leaves the machine) read many files, long logs or command output and return short answers with verified quotes; they can also apply small, fully specified edits. Use when answering would take several file reads. Skip it when one grep answers (a named variable, function or middleware) or when you will read the whole short file anyway.
+description: Local models (nothing leaves the machine) read for you and return short answers with verified quotes. Before reading or grepping, use it for a long log or command output (local_digest), the routes or endpoints of a folder or those lacking a protection (local_ask with extract=endpoints), and facts spread over many files. It can also apply small, fully specified edits. Skip it when one grep answers (a named variable, function or middleware) or when you will read a short file anyway.
 ---
 
 # readscout
@@ -9,7 +9,7 @@ Local models read, you decide. Send **paths** and a **question**, never file con
 
 ## Delegate only when it saves work
 
-- **Yes**: facts spread over files or folders you have not read (more than ~300 lines), a module you need to understand without reading it, a long log.
+- **Yes**: a long log or command output (`local_digest`); the endpoints or routes of a folder, or those without auth or another protection (`local_ask` with `extract`); facts spread over files you have not read (more than ~300 lines); a module you need to understand without reading it.
 - **No**: one `grep` answers it, a short file you will read in full next, any judgement (review, "is there a bug", security).
 
 ## Tools
