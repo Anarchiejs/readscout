@@ -311,15 +311,16 @@ def _clean(text: str, limit=300) -> str:
 
 
 MAX_QUOTE_SHOWN = 200
+MAX_ERROR_QUOTE = 500         # an error line of a log is the answer itself: cutting it sends the reader back to the file
 
 
-def _quote(q: str) -> str:
+def _quote(q: str, limit: int = MAX_QUOTE_SHOWN) -> str:
     """A verified quote is shown as found in the source: control characters out, spaces untouched, never an ellipsis.
     A longer one is cut to a contiguous fragment and says so outside the guillemets."""
     one = re.sub(r'[\x00-\x08\x0b-\x1f\x7f]', ' ', q)
-    if len(one) <= MAX_QUOTE_SHOWN:
+    if len(one) <= limit:
         return f'« {one} »'
-    return f'« {one[:MAX_QUOTE_SHOWN]} » (fragment of {len(one)} characters)'
+    return f'« {one[:limit]} » (fragment of {len(one)} characters)'
 
 
 MAX_FACT_QUOTE = 120          # an extracted fact on a longer line is quoted by the part of the line around it
@@ -563,7 +564,7 @@ DETERMINISTIC_MAX_GROUPS = 12     # a log with more distinct events than this is
 HEAD_LINES, TAIL_LINES = 3, 5
 SHORT_TRACE = 8                   # an error trace up to this many lines is shown whole in a deterministic digest
 # A focus asking what failed is answered by the full list of events: a model would only select from it.
-ERROR_FOCUS = re.compile(r'(?i)\b(errors?|fail\w*|crash\w*|causes?|root|exceptions?|wrong|broke\w*|incident|why|'
+ERROR_FOCUS = re.compile(r'(?i)\b(errors?|fail\w*|crash\w*|causes?|root|exceptions?|wrong|broke\w*|incident|why|[45]xx|'
                          r'erreurs?|échou\w*|echou\w*|échec\w*|plant\w*|panne|pourquoi)\b')
 
 
@@ -576,28 +577,39 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int,
     out = [head, 'Chronological order of first occurrence. The first event is not necessarily the cause: no cause is inferred here.']
     if focus:
         out[1] += ' Every error-like event is listed, so no model was needed for the focus: relate them yourself.'
+    # Too many distinct events to list: the error-level ones are listed, the others are counted (see the end).
+    listed = groups if len(groups) <= DETERMINISTIC_MAX_GROUPS or not severe else [g for g in groups if logs.is_error(g.first[0].text)]
     size = len(head)
     visible = {(ln.path, ln.no) for ln in lines[:HEAD_LINES] + lines[-TAIL_LINES:]}
     excerpt_loss = any(ln.cut for ln in lines)
-    for g in groups[:max_items]:
+
+    def limit(text: str) -> int:
+        return MAX_ERROR_QUOTE if logs.is_error(text) else MAX_QUOTE_SHOWN
+
+    def q(ln: Line) -> str:
+        return _quote(ln.text.strip(), limit(ln.text))
+    for g in listed[:max_items]:
         first = g.first[0]
         times = f' x{g.count}, last at line {g.last_start.no}' if g.count > 1 else ''
-        row = f'- {first.path}:{first.no}{times} | {_quote(first.text.strip())}'
+        row = f'- {first.path}:{first.no}{times} | {q(first)}'
         whole = len(g.first) <= SHORT_TRACE and logs.is_error(first.text)
         if whole:       # a short error trace is shown entirely: its middle frames are often what the reader needs
-            row += ''.join(f'\n    {ln.path}:{ln.no} {_quote(ln.text.strip())}' for ln in g.first[1:])
+            row += ''.join(f'\n    {ln.path}:{ln.no} {q(ln)}' for ln in g.first[1:])
         elif len(g.first) > 1:
-            row += f' ... ends {first.path}:{g.first[-1].no} {_quote(g.first[-1].text.strip())}'
-        if g.count > 1 and len(g.variants) > 1:
+            row += f' ... ends {first.path}:{g.first[-1].no} {q(g.first[-1])}'
+        # A few repeats of an error are distinct incidents (orders, requests): each is cited so none has to be looked up.
+        again = g.starts[1:] if logs.is_error(first.text) and 1 < g.count <= len(g.starts) else []
+        row += ''.join(f'\n    also {ln.path}:{ln.no} | {q(ln)}' for ln in again)
+        if g.count > 1 and len(g.variants) > 1 and not again:
             row += f' | distinct values: {", ".join(g.variants)}'
         if size + len(row) > MAX_RECEIPT_CHARS:
             break
         out.append(row)
         size += len(row) + 1
-        visible.update((ln.path, ln.no) for ln in (g.first if whole else (g.first[0], g.first[-1])))
+        visible.update((ln.path, ln.no) for ln in [*(g.first if whole else (g.first[0], g.first[-1])), *again])
     shown = len(out) - 2
-    if shown < len(groups):
-        out.append(f'... {len(groups) - shown} more distinct event(s) not shown (raise max_items).')
+    if shown < len(listed):
+        out.append(f'... {len(listed) - shown} more distinct event(s) not shown (raise max_items).')
     for title, chunk_ in (('First lines', lines[:HEAD_LINES]), ('Final lines', lines[-TAIL_LINES:])):
         out.append(f'{title}:')
         out += [f'- {ln.path}:{ln.no} | {_quote(ln.text.strip()[:MAX_QUOTE_SHOWN])}' for ln in chunk_ if ln.text.strip()]
@@ -607,11 +619,11 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int,
     background = {(ln.path, ln.no) for g in groups if has_errors and not logs.is_error(g.first[0].text) for ln in g.first}
 
     def missing(counted: bool) -> list[str]:
-        keep = [g for g in groups if ((g.first[0].path, g.first[0].no) not in background) == counted]
-        values_cut = [g.first[0].no for g in keep if g.variants_omitted]
+        keep = [g for g in listed if ((g.first[0].path, g.first[0].no) not in background) == counted]
+        values_cut = [g.first[0].no for g in keep if g.variants_omitted and not (logs.is_error(g.first[0].text) and g.count <= len(g.starts))]
         traces_cut = [f'{g.first[0].no}-{g.first[-1].no}' for g in keep if any((ln.path, ln.no) not in visible for ln in g.first)]
         long_cut = sorted({ln.no for ln in lines if (ln.path, ln.no) in visible and ((ln.path, ln.no) not in background) == counted
-                           and len(ln.text.strip()) > MAX_QUOTE_SHOWN})
+                           and len(ln.text.strip()) > limit(ln.text)})
         return [f'{what} {", ".join(map(str, where[:8]))}{", ..." if len(where) > 8 else ""}' for what, where in (
             ('distinct values of the event(s) at line(s)', values_cut), ('middle lines of the trace(s) at', traces_cut),
             ('end of the long line(s)', long_cut)) if where]
@@ -623,11 +635,16 @@ def digest_receipt(lines: list[Line], groups: list, nbytes: int, max_items: int,
         out.append('No error-like line matched (error, exception, fatal, failed, timeout, warn...): this does not prove the run was fine, '
                    'read the final lines above.')
     else:
-        status = 'partial' if shown < len(groups) or excerpt_loss else 'complete'
+        status = 'partial' if shown < len(listed) or excerpt_loss else 'complete'
         if excerpt_loss:
             out.append(f'Not shown: {"; ".join(unseen) or "the end of lines cut while reading"}. Read only those lines if they matter.')
         if unseen_background:
             out.append(f'Not shown, not error-level (status unaffected): {"; ".join(unseen_background)}.')
+        rest = [g for g in groups if g not in listed]
+        if rest:
+            first_of = ', '.join(f'{g.first[0].no} | {_quote(g.first[0].text.strip()[:80])}' for g in rest[:3])
+            out.append(f'Not listed, not error-level (status unaffected): {len(rest)} other event group(s), '
+                       f'{sum(g.count for g in rest)} occurrence(s), e.g. line {first_of}.')
         if status == 'complete':
             out.append('Complete: every error-like event is listed with its source line; no re-read is needed to cite them.')
     out[0] = head.replace('STATUS', status)
@@ -639,7 +656,8 @@ def digest(path: str, focus: str = '', tier='fast', max_items=25) -> str:
     lines = load_lines(path, roots, allowed=paths.allowed_folders(cfg))
     nbytes = input_bytes(lines)
     groups = logs.group_events(lines)
-    if (not focus or ERROR_FOCUS.search(focus)) and len(groups) <= DETERMINISTIC_MAX_GROUPS:
+    severe = sum(logs.is_error(g.first[0].text) for g in groups)
+    if (not focus or ERROR_FOCUS.search(focus)) and (len(groups) <= DETERMINISTIC_MAX_GROUPS or 0 < severe <= DETERMINISTIC_MAX_GROUPS):
         text, status = digest_receipt(lines, groups, nbytes, max_items, focus)
         record({'tool': 'digest', 'model': 'deterministic', 'bytes_read': nbytes, 'chars_returned': len(text),
                 'verified': len(groups), 'dropped': 0, 'seconds': 0, 'errors': 0, 'status': status})

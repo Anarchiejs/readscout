@@ -3,6 +3,10 @@
 ## Unreleased
 
 - 0.1.7 is prepared locally; no new release has been published.
+- Log digests of JSON lines, access logs and builds with many distinct warnings no longer start a model (9 to 31 s, during which the agent polled the call): a hex id no longer gives each line its own event shape, the level of a JSON line is read from its field, an access-log status of 500 or more is an error-level event (400 or more an event), and when a log has more distinct events than can be listed its error-level events are listed and the others counted. Each repeat of an error is cited when there are at most 12, an error line is quoted up to 500 characters, and the exception line a JVM test report prints under its `[ERROR]` line belongs to it.
+- `extract=routes` and `extract=endpoints` read every supported framework present: Python decorators, Express, and now Spring (`@GetMapping`... with the class `@RequestMapping` prefix and security annotations, Java and Kotlin), NestJS (`@Get`... with the `@Controller` prefix, `@UseGuards` and a stated `setGlobalPrefix`) and Go routers (gin, echo, chi, gorilla, with `Group`/`Route`/`PathPrefix` prefixes resolved through variables and through groups passed to registration functions). The `!A,B` filter applies to all of them. These projects used to get an `undetermined` receipt describing Python decorators.
+- A prefix added in another file to a router (Python `include_router(..., prefix=...)` without dependencies, a Go group created by a caller outside the files read) is stated in the coverage with its line instead of making the receipt partial: every endpoint is listed, only its full path is not.
+- The skill description and the tool descriptions name the supported frameworks and log formats, and say to call the tool directly (the agent opened SKILL.md before half of its calls, one more request each). The tool catalog stays within its budget (3 553 characters).
 
 ## 0.1.7
 

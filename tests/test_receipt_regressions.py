@@ -139,8 +139,16 @@ def test_a_computed_router_prefix_is_reported_not_guessed():
 
 
 def test_a_prefix_added_to_a_router_from_another_file_is_reported():
+    # Lot 5: reported as unrecognized it made the receipt partial and the agent re-read every router file; every endpoint is
+    # still listed, so it is stated in the coverage with its line, and the status stays complete.
     res = extract.run('endpoints', lines_of('main.py', 'from app import items\napp.include_router(items.router, prefix="/v1")'))
-    assert any('prefix' in why and 'not resolved' in why for _, _, why in res.unrecognized)
+    assert not res.unrecognized
+    assert any('main.py:2 include_router(items.router, prefix=\'/v1\')' in c and 'not applied' in c for c in res.coverage)
+
+
+def test_dependencies_added_to_a_router_from_another_file_still_make_the_receipt_partial():
+    res = extract.run('endpoints', lines_of('main.py', 'app.include_router(items.router, dependencies=[Depends(auth)])'))
+    assert any('dependencies' in why for _, _, why in res.unrecognized)
 
 
 def test_the_scope_says_which_prefixes_are_resolved():
@@ -190,7 +198,7 @@ def test_a_short_error_trace_is_shown_whole(incident):
 
 
 def test_a_partial_digest_names_what_it_did_not_show():
-    rows = ['2026-10-13T14:00:00Z INFO start'] + [f'2026-10-13T14:00:{i:02d}Z ERROR worker failed host=h{i}' for i in range(1, 10)]
+    rows = ['2026-10-13T14:00:00Z INFO start'] + [f'2026-10-13T14:00:{i:02d}Z ERROR worker failed host=h{i}' for i in range(1, 20)]
     lines = [Line('w.log', n, row) for n, row in enumerate(rows, 1)]
     text, status = tasks.digest_receipt(lines, logs.group_events(lines), 500, 25)
     assert status == 'partial'

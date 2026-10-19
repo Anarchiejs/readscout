@@ -1,6 +1,6 @@
 ---
 name: readscout
-description: Local models (nothing leaves the machine) read for you and return short answers with verified quotes. Before reading or grepping, use it for a long log or command output (local_digest), the routes or endpoints of a folder or those lacking a protection (local_ask with extract=endpoints), and facts spread over many files. It can also apply small, fully specified edits. Skip it when one grep answers (a named variable, function or middleware) or when you will read a short file anyway.
+description: Local models read for you (nothing leaves the machine) and return short answers with verified quotes. Before reading or grepping, use it for a long log or command output (local_digest) and for the routes or endpoints of a folder, or those lacking a protection (local_ask extract=endpoints: Python, Express, Spring, NestJS, Go). Call the tool directly, its description says how to read the receipt. Skip it when one grep answers (a named variable, function or middleware) or for a short file you will read anyway.
 ---
 
 # readscout
@@ -19,7 +19,7 @@ Local models read, you decide. Send **paths** and a **question**, never file con
 | Facts over files or folders | `local_ask(paths, question)` |
 | Overview of a module | `local_ask(paths, question, mode="summary")` |
 | Long log or command output | save it to a file, then `local_digest(path)` |
-| Env variables, routes, Python endpoints, Supabase accesses | `local_ask(paths, question, extract="env")` (or `routes`, `endpoints`, `supabase`): exact, no model, lists every item (you filter); `"endpoints!A,B"` = endpoints mentioning neither A nor B (textual, not proof of public) |
+| Env variables, routes or endpoints (Python, Express, Spring, NestJS, Go), Supabase | `local_ask(paths, question, extract="env")` (or `routes`, `endpoints`, `supabase`): exact, no model, lists every item (you filter); `"endpoints!A,B"` = endpoints mentioning neither A nor B (textual, not proof of public) |
 | Mechanical edit already decided | read `references/local_edit.md` first, then `local_edit` |
 
 Leave `quality` unset. Relative paths start at your working folder; folders are accepted (up to 1.5 MB).

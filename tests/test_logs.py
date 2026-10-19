@@ -48,7 +48,7 @@ def test_digest_is_deterministic_for_a_simple_log(tmp_path, monkeypatch):
     monkeypatch.setattr(tasks, 'model_for', lambda *a: pytest.fail('a simple log must not start a model'))
     text = tasks.digest('build.log')
     assert 'deterministic, no model' in text and 'status: complete' in text
-    assert 'build.log:2 x3, last at line 5' in text and 'distinct values' in text and 'db-2' in text
+    assert 'build.log:2 x3, last at line 5' in text and 'also build.log:5 ' in text and 'db-2' in text   # few repeats: each cited
     assert '\n    build.log:7 ' in text and '\n    build.log:9 « ValueError: bad input »' in text    # the short trace is one unit, shown whole
     assert 'no cause is inferred' in text and 'Final lines:' in text and 'Kept 7 event line(s)' in text
 

@@ -26,22 +26,22 @@ def _safe(fn, *a, **k):
 def local_ask(paths: list[str], question: str, mode: Literal['find', 'summary'] = 'find', quality: bool | None = None,
               max_items: int = 40, extract: str = '') -> str:
     """Get facts from many or large files without reading them: pass paths (files or folders) and a question, never
-    contents. Skip it when one grep or one short file answers. Each fact has its real path:line and a quote verified
-    verbatim in the source; unquotable facts are dropped. mode='summary' adds an unverified summary; leave quality unset.
-    Use it instead of reading route files: extract=endpoints lists the routes or endpoints of a folder, 'endpoints!A,B' those
-    lacking A and B, without auth (textual, not proof). extract (exact, no model) env | routes | endpoints | supabase lists
-    every item of that kind, filtering is yours.
-    Header status: complete = answer from the receipt, no re-read (a model's sentence is not proof: open the cited
-    lines before a security or correctness decision); partial = check only what it lists; undetermined = do it yourself."""
+    contents. Skip it when one grep or one short file answers. Each fact has its path:line and a quote verified in
+    the source. mode='summary' adds an unverified summary; leave quality unset.
+    Use it instead of reading route files: extract=endpoints lists the routes or endpoints of a folder (Python, Express,
+    Spring, NestJS, Go) with prefixes, 'endpoints!A,B' those lacking A and B (textual, not proof of public).
+    extract (exact, no model) env | routes | endpoints | supabase lists every item, filtering is yours.
+    Status: complete = answer from the receipt, no re-read (a model's sentence is not proof: open the cited lines
+    before a security decision); partial = check only what it lists; undetermined = do it yourself."""
     return _safe(tasks.ask, paths, question, mode, quality, max_items, extract)
 
 
 @mcp.tool(annotations=READ, structured_output=False)
 def local_digest(path: str, focus: str = '') -> str:
     """Use this instead of reading or grepping a long log or command output (redirect a noisy command to a file first):
-    every error-like event with path:line, short traces whole, the final lines; a model only for a varied log or a
-    focus that is not about failures. Status: complete = cite from the receipt, no re-read; partial = read only the
-    lines it names."""
+    no model, under a second, for plain, JSON, access and build or test logs: every error-level line with path:line,
+    short traces whole, the final lines; a model only for a focus not about failures.
+    Status: complete = cite from the receipt, no re-read; partial = read only the lines it names."""
     return _safe(tasks.digest, path, focus)
 
 

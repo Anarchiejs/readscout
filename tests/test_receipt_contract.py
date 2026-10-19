@@ -73,7 +73,8 @@ def test_values_omitted_from_warnings_do_not_make_an_error_digest_partial():
 
 
 def test_values_omitted_from_an_error_still_make_the_digest_partial():
-    lines = [Line('log.txt', n + 1, f'ERROR worker-{n} failed retries={n}') for n in range(10)]
+    # more repeats than are cited one by one (logs.MAX_OCCURRENCES), so some values stay unseen
+    lines = [Line('log.txt', n + 1, f'ERROR worker-{n} failed retries={n}') for n in range(20)]
     assert tasks.digest_receipt(lines, logs.group_events(lines), 300, 25)[1] == 'partial'
 
 

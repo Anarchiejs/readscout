@@ -509,6 +509,7 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
     router_deps: dict[tuple[str, str], list[str]] = {}
     own_prefix: dict[tuple[str, str], str] = {}
     included_in: dict[tuple[str, str], tuple[str, str]] = {}     # child router -> (parent, prefix of the inclusion)
+    prefix_elsewhere: list[str] = []
     for src, tree in trees:
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
@@ -526,6 +527,12 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                 child = target.id if isinstance(target, ast.Name) else ''
                 local = bool(child) and any(
                     isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == child for t in n.targets) for n in tree.body)
+                if not local and not deps:
+                    # Only a prefix, applied to a router of another module: every endpoint is still listed, only its full path is not.
+                    # Stated, not counted as unrecognized: a partial status would send the reader to re-read files it does not need.
+                    prefix_elsewhere.append(f'{src.path}:{node.lineno} include_router({ast.unparse(target)}, prefix='
+                                            f'{ast.unparse(next(k.value for k in node.keywords if k.arg == "prefix"))})')
+                    continue
                 if not local:
                     what = ', '.join(w for w, used in (('dependencies=...', deps), ('prefix=...', prefix != '')) if used)
                     if child:
@@ -604,8 +611,11 @@ def extract_endpoints(sources: list[Source], lacking: str = '') -> Result:
                             + '.' + unresolved_note)
     elif unresolved:
         res.coverage.append('Router prefixes:' + unresolved_note)
-    elif applied:
+    elif applied and not prefix_elsewhere:
         res.coverage.append('No router prefix is declared in these files.')
+    if prefix_elsewhere:
+        res.coverage.append(f'Prefixes added to routers of other modules, not applied to the paths above: {"; ".join(prefix_elsewhere[:8])}'
+                            f'{"; ..." if len(prefix_elsewhere) > 8 else ""}. Every endpoint is listed; join them yourself if full paths matter.')
     return res
 
 
@@ -652,16 +662,35 @@ def extract_supabase(sources: list[Source]) -> Result:
     return res
 
 
+def extract_http(sources: list[Source], kind: str, lacking: str = '') -> Result:
+    """routes and endpoints are one question to the reader: every framework whose files are present is read, whichever was asked."""
+    from . import webroutes
+    names = [n.strip() for n in re.split(r'[,|]', lacking) if n.strip()]
+    nest = {s.path for s in sources if webroutes.framework_of(s) == 'nest'}
+    express = extract_routes([s for s in sources if s.path not in nest])
+    if names:
+        express.facts = [f for f in express.facts if not any(re.search(r'\b' + re.escape(n) + r'\b', f.detail + ' ' + f.cite) for n in names)]
+    parts = [extract_endpoints(sources, lacking), express, webroutes.extract(sources, names)]
+    present = [p for p in parts if p.files] or parts
+    res = Result(kind, '. Also: '.join(p.scope for p in present if p.scope))
+    for p in present:
+        res.facts += p.facts
+        res.files += p.files
+        res.unrecognized += p.unrecognized
+        res.inspected += p.inspected
+        res.coverage += p.coverage
+        res.excerpts.update(p.excerpts)
+    return res
+
+
 def run(kind: str, lines: list[Line]) -> Result:
     """kind: env | routes | endpoints | supabase, and 'endpoints!A,B' for the endpoints that mention neither A nor B."""
     name, _, lacking = kind.partition('!')
     sources = group_files(lines)
     if name == 'env':
         return extract_env(sources)
-    if name == 'routes':
-        return extract_routes(sources)
-    if name == 'endpoints':
-        return extract_endpoints(sources, lacking)
+    if name in ('routes', 'endpoints'):
+        return extract_http(sources, name, lacking)
     if name == 'supabase':
         return extract_supabase(sources)
     raise ValueError(f'Unknown extraction "{kind}": use one of {", ".join(KINDS)}')
